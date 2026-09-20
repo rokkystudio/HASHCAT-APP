@@ -1,4 +1,4 @@
-package fuck.system.airtools
+package fuck.system.hashcat
 
 import android.app.Activity
 import android.content.Intent
@@ -6,7 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.View
-import fuck.system.airtools.databinding.ActivityMainBinding
+import fuck.system.hashcat.databinding.ActivityMainBinding
 import java.io.File
 import java.io.OutputStreamWriter
 import kotlin.concurrent.thread

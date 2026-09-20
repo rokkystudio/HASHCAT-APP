@@ -3,13 +3,13 @@ plugins {
 }
 
 android {
-    namespace = "fuck.system.airtools"
+    namespace = "fuck.system.hashcat"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "fuck.system.airtools"
+        applicationId = "fuck.system.hashcat"
         minSdk = 26
         targetSdk = 37
         versionCode = 1

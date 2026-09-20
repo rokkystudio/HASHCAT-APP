@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "fuck.system.hashcat"
+    namespace = "fuck.system.hashcat.runtime"
     compileSdk {
         version = release(37)
     }

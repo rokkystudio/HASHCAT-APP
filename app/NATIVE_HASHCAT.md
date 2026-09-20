@@ -1,9 +1,9 @@
 # Bundled native Hashcat backend
 
-AIRTOOLS launches Hashcat as a native executable stored in the APK.
+HASHCAT launches Hashcat as a native executable stored in the APK.
 
 The Hashcat runtime is not stored directly under `src/main`. It is built in the
-separate `HASHCAT` project and imported into AIRTOOLS by:
+separate `HASHCAT` project and imported into HASHCAT-APP by:
 
 ```powershell
 .\tools\import-hashcat-android.ps1

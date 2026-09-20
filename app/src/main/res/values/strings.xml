@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">AIRTOOLS</string>
+    <string name="app_name">HASHCAT</string>
     <string name="converter_title">CAP → hc22000</string>
     <string name="converter_description">Поддерживается обычный libpcap от airodump-ng с 802.11 или Radiotap кадрами. Конвертер формирует WPA*02 для пар M1+M2 с совпадающим replay counter.</string>
     <string name="select_capture">Выбрать CAP</string>

@@ -1,4 +1,4 @@
-package fuck.system.airtools
+package fuck.system.hashcat
 
 import java.io.EOFException
 import java.io.IOException

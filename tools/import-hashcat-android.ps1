@@ -30,7 +30,7 @@ $JniDir = Join-Path $GeneratedRuntimeDir "jniLibs\$AndroidAbi"
 $AssetsDir = Join-Path $GeneratedRuntimeDir 'assets\hashcat'
 
 if (-not (Test-Path $BuildAbiDir)) { throw "HASHCAT ABI build output is missing: $BuildAbiDir" }
-if (-not (Test-Path $HashcatModuleDir)) { throw "AIRTOOLS hashcat module is missing: $HashcatModuleDir" }
+if (-not (Test-Path $HashcatModuleDir)) { throw "HASHCAT-APP hashcat module is missing: $HashcatModuleDir" }
 
 if (Test-Path $GeneratedRuntimeDir) { Remove-Item -Recurse -Force -Path $GeneratedRuntimeDir }
 New-Item -ItemType Directory -Force -Path $JniDir | Out-Null

@@ -1,4 +1,4 @@
-package fuck.system.airtools
+package fuck.system.hashcat
 
 import android.content.Context
 import android.os.Build
@@ -148,7 +148,7 @@ class HashcatRunner(
         val cacheDirectory = File(context.cacheDir, "hashcat").apply {
             mkdirs()
         }
-        val potfile = File(dataDirectory, "airtools.potfile")
+        val potfile = File(dataDirectory, "hashcat-app.potfile")
         val recovered = File(dataDirectory, "recovered.txt")
 
         val command = listOf(
@@ -160,7 +160,7 @@ class HashcatRunner(
             "--status",
             "--status-timer=1",
             "--session",
-            "airtools",
+            "hashcat-app",
             "--potfile-path",
             potfile.absolutePath,
             "--outfile",
@@ -429,7 +429,7 @@ class HashcatRunner(
     {
         const val HASHCAT_EXECUTABLE_NAME = "libhashcat_exec.so"
         const val HASHCAT_ASSET_ROOT = "hashcat"
-        const val ASSET_MARKER_FILE = ".airtools-assets-version"
+        const val ASSET_MARKER_FILE = ".hashcat-app-assets-version"
         const val STOP_TIMEOUT_SECONDS = 2L
     }
 }

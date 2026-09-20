@@ -22,6 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AIRTOOLS"
+rootProject.name = "HASHCAT-APP"
 include(":app")
 include(":hashcat")
