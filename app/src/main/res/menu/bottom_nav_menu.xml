@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_hashcat"
+        android:icon="@drawable/ic_hashcat"
+        android:title="@string/nav_hashcat" />
+
+    <item
+        android:id="@+id/nav_converter"
+        android:icon="@drawable/ic_converter"
+        android:title="@string/nav_converter" />
+
+    <item
+        android:id="@+id/nav_log"
+        android:icon="@drawable/ic_log"
+        android:title="@string/nav_log" />
+</menu>

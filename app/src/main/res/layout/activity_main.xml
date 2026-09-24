@@ -1,191 +1,654 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true">
+    android:background="@color/background"
+    android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="24dp">
+        android:background="@color/title_bar"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="18dp"
+        android:paddingTop="13dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="13dp">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/converter_title"
-            android:textAppearance="?android:attr/textAppearanceLarge"
-            android:textStyle="bold" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="@string/converter_description"
-            android:textAppearance="?android:attr/textAppearanceMedium" />
-
-        <TextView
-            android:id="@+id/selectedFileTextView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="@string/no_file_selected"
-            android:textIsSelectable="true" />
-
-        <Button
-            android:id="@+id/selectCaptureButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/select_capture" />
-
-        <Button
-            android:id="@+id/convertButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:enabled="false"
-            android:text="@string/convert_and_save" />
-
-        <ProgressBar
-            android:id="@+id/progressBar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:indeterminate="true"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/statusTextView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:textAppearance="?android:attr/textAppearanceMedium"
-            android:textIsSelectable="true" />
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginTop="32dp"
-            android:layout_marginBottom="24dp"
-            android:background="?android:attr/listDivider" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/hashcat_title"
-            android:textAppearance="?android:attr/textAppearanceLarge"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/hashcatBackendTextView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:textIsSelectable="true" />
-
-        <EditText
-            android:id="@+id/hashModeEditText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:hint="@string/hash_mode_hint"
-            android:inputType="number"
-            android:text="@string/default_hash_mode" />
-
-        <TextView
-            android:id="@+id/hashFileTextView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/no_hash_file_selected"
-            android:textIsSelectable="true" />
-
-        <Button
-            android:id="@+id/selectHashFileButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/select_hash_file" />
-
-        <TextView
-            android:id="@+id/wordlistFileTextView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/no_wordlist_selected"
-            android:textIsSelectable="true" />
-
-        <Button
-            android:id="@+id/selectWordlistButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/select_wordlist" />
+        <ImageView
+            android:id="@+id/appIcon"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="@string/app_name"
+            android:scaleType="fitCenter"
+            android:src="@mipmap/ic_launcher" />
 
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:orientation="horizontal">
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
 
-            <Button
-                android:id="@+id/startHashcatButton"
-                android:layout_width="0dp"
+            <TextView
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:enabled="false"
-                android:text="@string/start_hashcat" />
+                android:includeFontPadding="false"
+                android:text="@string/app_name"
+                android:textColor="@color/text_primary"
+                android:textSize="22sp"
+                android:textStyle="bold" />
 
-            <Button
-                android:id="@+id/stopHashcatButton"
-                android:layout_width="0dp"
+            <TextView
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:enabled="false"
-                android:text="@string/stop_hashcat" />
-
-            <Button
-                android:id="@+id/clearLogButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:text="@string/clear_log" />
+                android:layout_marginTop="3dp"
+                android:includeFontPadding="false"
+                android:text="@string/app_subtitle"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
 
         </LinearLayout>
 
-        <ProgressBar
-            android:id="@+id/hashcatProgressBar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:indeterminate="true"
-            android:visibility="gone" />
+        <ImageButton
+            android:id="@+id/themeToggleButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_title_bar_button"
+            android:backgroundTint="@null"
+            android:contentDescription="@string/theme_light"
+            android:padding="11dp"
+            android:scaleType="fitCenter"
+            android:stateListAnimator="@null"
+            android:src="@drawable/theme_sun" />
 
-        <ScrollView
-            android:id="@+id/hashcatLogScrollView"
-            android:layout_width="match_parent"
-            android:layout_height="280dp"
-            android:layout_marginTop="16dp"
-            android:background="#11000000"
-            android:fillViewport="true">
-
-            <TextView
-                android:id="@+id/hashcatLogTextView"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:fontFamily="monospace"
-                android:padding="12dp"
-                android:text="@string/hashcat_log_empty"
-                android:textIsSelectable="true"
-                android:textSize="12sp" />
-
-        </ScrollView>
+        <ImageButton
+            android:id="@+id/languageFlag"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="12dp"
+            android:background="@drawable/bg_title_bar_button"
+            android:backgroundTint="@null"
+            android:contentDescription="@string/language_russian"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            android:stateListAnimator="@null"
+            android:src="@drawable/flag_ru" />
 
     </LinearLayout>
 
-</ScrollView>
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <ScrollView
+            android:id="@+id/hashcatScreen"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:overScrollMode="never">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:text="@string/hash_file_panel_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/hash_file_panel_description"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/hashFileTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/no_hash_file_selected"
+                        android:textColor="@color/text_primary"
+                        android:textIsSelectable="true"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/hashFileInfoTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/file_info_empty"
+                        android:textColor="@color/text_secondary"
+                        android:textIsSelectable="true"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/selectHashFileButton"
+                            android:layout_width="0dp"
+                            android:layout_height="46dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_button"
+                            android:fontFamily="sans"
+                            android:stateListAnimator="@null"
+                            android:text="@string/select_hash_file"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp" />
+
+                        <Button
+                            android:id="@+id/pasteHashButton"
+                            android:layout_width="0dp"
+                            android:layout_height="46dp"
+                            android:layout_marginStart="8dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_button"
+                            android:fontFamily="sans"
+                            android:stateListAnimator="@null"
+                            android:text="@string/paste_hashes"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp" />
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:labelFor="@id/hashModeButton"
+                        android:text="@string/hash_mode_label"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:id="@+id/hashModeButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="7dp"
+                        android:background="?android:attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center_vertical"
+                        android:minHeight="72dp"
+                        android:orientation="horizontal"
+                        android:padding="8dp">
+
+                        <ImageView
+                            android:id="@+id/hashModeIconImageView"
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
+                            android:padding="6dp"
+                            android:src="@drawable/ic_hashcat"
+                            android:tint="@color/navigation_icon_active" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="10dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/hashModeTitleTextView"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:includeFontPadding="false"
+                                android:text="@string/hash_mode_loading"
+                                android:textColor="@color/text_primary"
+                                android:textSize="14sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/hashModeCategoryTextView"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:includeFontPadding="false"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+
+                            <TextView
+                                android:id="@+id/hashModeDescriptionTextView"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:includeFontPadding="false"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+
+                        </LinearLayout>
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:text="@string/candidate_panel_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/candidate_panel_description"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+
+                    <RadioGroup
+                        android:id="@+id/candidateSourceRadioGroup"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal">
+
+                        <RadioButton
+                            android:id="@+id/candidateTemplateRadioButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/candidate_template"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp" />
+
+                        <RadioButton
+                            android:id="@+id/candidateWordlistRadioButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/candidate_wordlist"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp" />
+
+                    </RadioGroup>
+
+                    <TextView
+                        android:id="@+id/maskTemplateLabelTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/mask_template_label"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:id="@+id/maskTemplateRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <EditText
+                            android:id="@+id/maskTemplateEditText"
+                            android:layout_width="0dp"
+                            android:layout_height="46dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_input"
+                            android:fontFamily="monospace"
+                            android:inputType="textNoSuggestions"
+                            android:maxLines="1"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="12dp"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp" />
+
+                        <Button
+                            android:id="@+id/maskAssistantButton"
+                            android:layout_width="104dp"
+                            android:layout_height="46dp"
+                            android:layout_marginStart="8dp"
+                            android:background="@drawable/bg_button"
+                            android:fontFamily="sans"
+                            android:stateListAnimator="@null"
+                            android:text="@string/mask_assistant_short"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp" />
+
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/candidateTemplateInfoTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:includeFontPadding="false"
+                        android:textColor="@color/text_secondary"
+                        android:textIsSelectable="true"
+                        android:textSize="12sp" />
+
+                    <TextView
+                        android:id="@+id/wordlistFileTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/no_wordlist_selected"
+                        android:textColor="@color/text_primary"
+                        android:textIsSelectable="true"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/wordlistFileInfoTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/file_info_empty"
+                        android:textColor="@color/text_secondary"
+                        android:textIsSelectable="true"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/selectWordlistButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="46dp"
+                        android:layout_marginTop="8dp"
+                        android:background="@drawable/bg_button"
+                        android:fontFamily="sans"
+                        android:stateListAnimator="@null"
+                        android:text="@string/select_wordlist"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp" />
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:text="@string/hashcat_status_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/startHashcatButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="46dp"
+                        android:layout_marginTop="12dp"
+                        android:background="@drawable/bg_button"
+                        android:enabled="false"
+                        android:fontFamily="sans"
+                        android:stateListAnimator="@null"
+                        android:text="@string/start_hashcat"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <ProgressBar
+                        android:id="@+id/hashcatProgressBar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:indeterminate="true"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/hashcatStatusTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:background="@drawable/bg_log"
+                        android:fontFamily="monospace"
+                        android:padding="12dp"
+                        android:textColor="@color/text_primary"
+                        android:textIsSelectable="true"
+                        android:textSize="12sp" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </ScrollView>
+
+        <ScrollView
+            android:id="@+id/converterScreen"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:overScrollMode="never"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:text="@string/converter_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/converter_description"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/selectedFileTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/no_file_selected"
+                        android:textColor="@color/text_primary"
+                        android:textIsSelectable="true"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/pcapInfoTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/file_info_empty"
+                        android:textColor="@color/text_secondary"
+                        android:textIsSelectable="true"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/selectCaptureButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="46dp"
+                        android:layout_marginTop="12dp"
+                        android:background="@drawable/bg_button"
+                        android:fontFamily="sans"
+                        android:stateListAnimator="@null"
+                        android:text="@string/select_capture"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp" />
+
+                    <Button
+                        android:id="@+id/convertButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="46dp"
+                        android:layout_marginTop="10dp"
+                        android:background="@drawable/bg_button"
+                        android:enabled="false"
+                        android:fontFamily="sans"
+                        android:stateListAnimator="@null"
+                        android:text="@string/convert_and_save"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <ProgressBar
+                        android:id="@+id/progressBar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:indeterminate="true"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/statusTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:includeFontPadding="false"
+                        android:textColor="@color/text_secondary"
+                        android:textIsSelectable="true"
+                        android:textSize="13sp" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </ScrollView>
+
+        <ScrollView
+            android:id="@+id/hashcatLogScreen"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:overScrollMode="never"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:text="@string/hashcat_log_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <ScrollView
+                        android:id="@+id/hashcatLogScrollView"
+                        android:layout_width="match_parent"
+                        android:layout_height="520dp"
+                        android:layout_marginTop="12dp"
+                        android:background="@drawable/bg_log"
+                        android:fillViewport="true"
+                        android:overScrollMode="never">
+
+                        <TextView
+                            android:id="@+id/hashcatLogTextView"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:fontFamily="monospace"
+                            android:padding="12dp"
+                            android:text="@string/hashcat_log_empty"
+                            android:textColor="@color/text_primary"
+                            android:textIsSelectable="true"
+                            android:textSize="12sp" />
+
+                    </ScrollView>
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </ScrollView>
+
+    </FrameLayout>
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNav"
+        style="@style/Hashcat.BottomNavigation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/bottom_nav_menu" />
+
+</LinearLayout>

@@ -1,10 +1,10 @@
 package fuck.system.hashcat
 
 import android.content.Context
-import android.os.Build
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import org.json.JSONArray
 import kotlin.concurrent.thread
 
 /**
@@ -50,6 +50,26 @@ class HashcatRunner(
         fun onError(error: Throwable)
     }
 
+    data class HashMode(
+        val mode: Int,
+        val name: String,
+        val category: String
+    )
+
+    sealed class CandidateSource
+    {
+        data class Wordlist(
+            val file: File
+        ) : CandidateSource()
+
+        data class Mask(
+            val mask: String,
+            val customCharset: String,
+            val incrementMin: Int,
+            val incrementMax: Int
+        ) : CandidateSource()
+    }
+
     @Volatile
     private var process: Process? = null
 
@@ -62,50 +82,43 @@ class HashcatRunner(
     }
 
     /**
-     * Shows the active ABI, native extraction directory, runtime directory and
-     * whether the bundled executable is already present and runnable.
+     * Prepares the writable Hashcat data tree. This performs file I/O only and
+     * is intended to run on a worker thread before the user starts an attack.
      */
-    fun backendStatus(): String
+    fun prepare()
     {
-        val bundledExecutable = resolveBundledExecutable()
-        val runtimeExecutable = resolveRuntimeExecutable()
-        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"
-        val nativeDirectory = resolveNativeLibraryDirectory()
-        val runtimeDirectory = resolveRuntimeDirectory()
+        prepareRuntime()
+    }
 
-        val bundledStatus = when
+    /**
+     * Reads the hash-mode catalog generated from the same Hashcat release as the
+     * published Android binaries.
+     */
+    fun loadHashModes(): List<HashMode>
+    {
+        val json = context.assets.open(HASH_MODE_CATALOG).bufferedReader().use { reader ->
+            reader.readText()
+        }
+        val array = JSONArray(json)
+        val modes = ArrayList<HashMode>(array.length())
+
+        for (index in 0 until array.length())
         {
-            bundledExecutable.isFile && bundledExecutable.canExecute() -> "ready"
-            bundledExecutable.isFile -> "found, not executable"
-            else -> "missing"
+            val item = array.getJSONObject(index)
+
+            modes += HashMode(
+                mode = item.getInt("mode"),
+                name = item.getString("name"),
+                category = item.getString("category")
+            )
         }
 
-        val runtimeStatus = when
+        if (modes.isEmpty())
         {
-            runtimeExecutable.isFile && runtimeExecutable.canExecute() -> "ready"
-            runtimeExecutable.isFile -> "found, not executable"
-            else -> "not prepared"
+            throw IOException("Bundled Hashcat hash-mode catalog is empty.")
         }
 
-        return buildString {
-            append("Hashcat bundled backend: ")
-            append(bundledStatus)
-            append('\n')
-            append("Hashcat runtime backend: ")
-            append(runtimeStatus)
-            append('\n')
-            append("ABI: ")
-            append(abi)
-            append('\n')
-            append("Native dir: ")
-            append(nativeDirectory.absolutePath)
-            append('\n')
-            append("Runtime dir: ")
-            append(runtimeDirectory.absolutePath)
-            append('\n')
-            append("Expected APK binary: ")
-            append(bundledExecutable.absolutePath)
-        }
+        return modes
     }
 
     /**
@@ -116,8 +129,9 @@ class HashcatRunner(
     @Synchronized
     fun start(
         hashFile: File,
-        wordlistFile: File,
+        candidateSource: CandidateSource,
         hashMode: Int,
+        recoveredFile: File,
         listener: Listener
     )
     {
@@ -130,9 +144,7 @@ class HashcatRunner(
         val runtimeDirectory = resolveRuntimeDirectory()
         val nativeDirectory = resolveNativeLibraryDirectory()
 
-        val workDirectory = File(context.filesDir, "hashcat/work").apply {
-            mkdirs()
-        }
+        File(context.filesDir, "hashcat/work").mkdirs()
         val dataDirectory = File(context.filesDir, "hashcat/data").apply {
             mkdirs()
         }
@@ -140,24 +152,15 @@ class HashcatRunner(
             mkdirs()
         }
         val potfile = File(dataDirectory, "hashcat-app.potfile")
-        val recovered = File(dataDirectory, "recovered.txt")
+        recoveredFile.parentFile?.mkdirs()
 
-        val command = listOf(
-            executable.absolutePath,
-            "-m",
-            hashMode.toString(),
-            "-a",
-            "0",
-            "--status",
-            "--status-timer=1",
-            "--session",
-            "hashcat-app",
-            "--potfile-path",
-            potfile.absolutePath,
-            "--outfile",
-            recovered.absolutePath,
-            hashFile.absolutePath,
-            wordlistFile.absolutePath
+        val command = buildCommand(
+            executable = executable,
+            hashFile = hashFile,
+            candidateSource = candidateSource,
+            hashMode = hashMode,
+            potfile = potfile,
+            recovered = recoveredFile
         )
 
         val processBuilder = ProcessBuilder(command)
@@ -203,6 +206,64 @@ class HashcatRunner(
                 }
             }
         }
+    }
+
+    private fun buildCommand(
+        executable: File,
+        hashFile: File,
+        candidateSource: CandidateSource,
+        hashMode: Int,
+        potfile: File,
+        recovered: File
+    ): List<String>
+    {
+        val command = ArrayList<String>()
+
+        command += executable.absolutePath
+        command += "-m"
+        command += hashMode.toString()
+        command += "-a"
+        command += when (candidateSource)
+        {
+            is CandidateSource.Wordlist -> "0"
+            is CandidateSource.Mask -> "3"
+        }
+        command += "--status"
+        command += "--status-timer=1"
+        command += "--session"
+        command += "hashcat-app"
+        command += "--potfile-path"
+        command += potfile.absolutePath
+        command += "--outfile"
+        command += recovered.absolutePath
+
+        when (candidateSource)
+        {
+            is CandidateSource.Wordlist ->
+            {
+                command += hashFile.absolutePath
+                command += candidateSource.file.absolutePath
+            }
+
+            is CandidateSource.Mask ->
+            {
+                if (candidateSource.customCharset.isNotBlank())
+                {
+                    command += "-1"
+                    command += candidateSource.customCharset
+                }
+
+                command += "--increment"
+                command += "--increment-min"
+                command += candidateSource.incrementMin.toString()
+                command += "--increment-max"
+                command += candidateSource.incrementMax.toString()
+                command += hashFile.absolutePath
+                command += candidateSource.mask
+            }
+        }
+
+        return command
     }
 
     /**
@@ -422,5 +483,6 @@ class HashcatRunner(
         const val HASHCAT_ASSET_ROOT = "hashcat"
         const val ASSET_MARKER_FILE = ".hashcat-app-assets-version"
         const val STOP_TIMEOUT_SECONDS = 2L
+        const val HASH_MODE_CATALOG = "hashcat-modes.json"
     }
 }

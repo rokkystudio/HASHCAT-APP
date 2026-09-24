@@ -4,10 +4,32 @@ plugins {
 
 val hashcatVersion = "7.1.2"
 val androidAbi = "arm64-v8a"
+val publishedAndroidAbis = listOf(
+    "arm64-v8a",
+    "armeabi-v7a",
+    "x86",
+    "x86_64"
+)
 val runtimeArchive = layout.projectDirectory.file(
     "binaries/hashcat-v$hashcatVersion-android-$androidAbi.zip"
 )
+val publishedArchives = publishedAndroidAbis.map { abi ->
+    layout.projectDirectory.file(
+        "binaries/hashcat-v$hashcatVersion-android-$abi.zip"
+    )
+}
 val generatedRuntimeDir = layout.buildDirectory.dir("generated/hashcatRuntime")
+
+val missingPublishedArchives = publishedArchives
+    .map { it.asFile }
+    .filterNot(File::isFile)
+
+if (missingPublishedArchives.isNotEmpty()) {
+    throw GradleException(
+        "HASHCAT-APP requires the published Hashcat binaries. Missing: " +
+            missingPublishedArchives.joinToString { it.name }
+    )
+}
 
 val prepareHashcatRuntime by tasks.registering(Copy::class) {
     group = "build setup"

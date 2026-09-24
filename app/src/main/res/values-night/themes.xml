@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.HASHCAT" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:statusBarColor">@color/title_bar</item>
+        <item name="android:navigationBarColor">@color/navigation_background</item>
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorSurfaceContainer">@color/navigation_background</item>
+        <item name="colorSecondaryContainer">@color/navigation_active_indicator</item>
+    </style>
+</resources>
