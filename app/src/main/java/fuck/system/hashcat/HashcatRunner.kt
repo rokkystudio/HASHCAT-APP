@@ -15,18 +15,9 @@ import kotlin.concurrent.thread
  * The payload is produced by the :hashcat Android library module and merged
  * into this APK through implementation(project(":hashcat")).
  *
- * Supported ABI: arm64-v8a only. Put the executable here:
- * hashcat/build/generated/hashcatRuntime/jniLibs/arm64-v8a/libhashcat_exec.so
- *
- * Put Hashcat shared runtime files here:
- * hashcat/build/generated/hashcatRuntime/assets/hashcat/OpenCL
- * hashcat/build/generated/hashcatRuntime/assets/hashcat/modules
- * hashcat/build/generated/hashcatRuntime/assets/hashcat/bridges
- * hashcat/build/generated/hashcatRuntime/assets/hashcat/feeds
- * hashcat/build/generated/hashcatRuntime/assets/hashcat/rules
- * hashcat/build/generated/hashcatRuntime/assets/hashcat/tunings
- * hashcat/build/generated/hashcatRuntime/assets/hashcat/pcfg
- * hashcat/build/generated/hashcatRuntime/assets/hashcat/hashcat.hcstat2
+ * The :hashcat module owns the published Android Hashcat archives under
+ * hashcat/binaries and extracts the currently supported arm64-v8a runtime into
+ * generated Android sources automatically during a normal Gradle build.
  *
  * Hashcat resolves its shared directory from the executable location in
  * portable mode, so this runner copies the extracted .so and asset tree into a
@@ -269,8 +260,8 @@ class HashcatRunner(
         if (!source.isFile)
         {
             throw IOException(
-                "Native Hashcat backend is missing. Put the binary in " +
-                    "hashcat/build/generated/hashcatRuntime/jniLibs/<abi>/$HASHCAT_EXECUTABLE_NAME"
+                "Native Hashcat backend is missing from the APK. " +
+                    "Verify the published archive in hashcat/binaries and rebuild the app."
             )
         }
 
@@ -303,8 +294,8 @@ class HashcatRunner(
         if (rootEntries.isEmpty())
         {
             throw IOException(
-                "Hashcat shared files are missing. Put the packaged runtime tree in " +
-                    "hashcat/build/generated/hashcatRuntime/assets/$HASHCAT_ASSET_ROOT"
+                "Hashcat shared files are missing from the APK. " +
+                    "Verify the published archive in hashcat/binaries and rebuild the app."
             )
         }
 
