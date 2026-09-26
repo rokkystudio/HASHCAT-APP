@@ -66,9 +66,11 @@ library directory and the process-width vendor library directory
 (`/vendor/lib64` or `/vendor/lib`). The vendor directory is required on devices
 whose public GPU OpenCL implementation is provided as vendor `libOpenCL.so`.
 
-Hashcat's combined stdout/stderr stream is delivered to the in-app listener and
-mirrored to Android Logcat with tag `Hashcat`. Process start, exit and launch or
-stream failures are logged with the same tag.
+Hashcat's combined stdout/stderr stream is delivered to the in-app listener. The
+Log screen appends each visible line and mirrors that same line to Android Logcat
+with tag `Hashcat`. `HashcatRunner` also logs process start, exit and launch or
+stream failures with the same tag. The runner enables `HASHCAT_MEMORY=1` so
+Hashcat includes its memory-budget breakdown when backend allocation checks fail.
 
 ## Android execution constraint
 

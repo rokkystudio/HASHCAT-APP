@@ -5,6 +5,7 @@ import android.os.Build
 import android.util.Log
 import java.io.File
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 import org.json.JSONArray
 import kotlin.concurrent.thread
@@ -75,6 +76,9 @@ class HashcatRunner(
     @Volatile
     private var process: Process? = null
 
+    @Volatile
+    private var stopRequested: Boolean = false
+
     /**
      * Returns true while the native Hashcat process is alive.
      */
@@ -124,9 +128,10 @@ class HashcatRunner(
     }
 
     /**
-     * Starts the native executable and forwards live stdout/stderr output to the
-     * listener. Inputs are regular private files because native code cannot read
-     * Android content:// URIs directly.
+     * Starts the native executable, forwards its combined stdout/stderr stream to
+     * the listener and enables Hashcat memory-budget diagnostics in that stream.
+     * Inputs are regular private files because native code cannot read Android
+     * content:// URIs directly.
      */
     @Synchronized
     fun start(
@@ -175,6 +180,7 @@ class HashcatRunner(
             put("XDG_DATA_HOME", dataDirectory.absolutePath)
             put("XDG_CACHE_HOME", cacheDirectory.absolutePath)
             put("HASHCAT_SHARED_FOLDER", runtimeDirectory.absolutePath)
+            put("HASHCAT_MEMORY", "1")
             putNativeLibraryPath(
                 runtimeDirectory,
                 nativeDirectory,
@@ -201,6 +207,7 @@ class HashcatRunner(
         }
 
         process = startedProcess
+        stopRequested = false
         listener.onStarted(command)
 
         thread(name = "hashcat-output") {
@@ -208,7 +215,6 @@ class HashcatRunner(
             {
                 startedProcess.inputStream.bufferedReader().useLines { lines ->
                     lines.forEach { line ->
-                        Log.i(LOG_TAG, line)
                         listener.onOutput(line)
                     }
                 }
@@ -219,8 +225,15 @@ class HashcatRunner(
             }
             catch (error: Throwable)
             {
-                Log.e(LOG_TAG, "Hashcat process failed.", error)
-                listener.onError(error)
+                if (error is InterruptedIOException && stopRequested)
+                {
+                    Log.i(LOG_TAG, "Hashcat output stream interrupted by requested stop.")
+                }
+                else
+                {
+                    Log.e(LOG_TAG, "Hashcat process failed.", error)
+                    listener.onError(error)
+                }
             }
             finally
             {
@@ -300,6 +313,7 @@ class HashcatRunner(
     fun stop()
     {
         val activeProcess = process ?: return
+        stopRequested = true
 
         thread(name = "hashcat-stop") {
             activeProcess.destroy()

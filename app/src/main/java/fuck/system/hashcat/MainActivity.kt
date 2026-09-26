@@ -1164,8 +1164,13 @@ class MainActivity : Activity()
         binding.hashcatLogTextView.text = ""
     }
 
+    /**
+     * Appends one line to the in-app Hashcat log and mirrors the same line to
+     * Android Logcat under the Hashcat tag.
+     */
     private fun appendHashcatLog(line: String)
     {
+        android.util.Log.i("Hashcat", line)
         binding.hashcatLogTextView.append(line)
         binding.hashcatLogTextView.append("\n")
         binding.hashcatLogScrollView.post {
