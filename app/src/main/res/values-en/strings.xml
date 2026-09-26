@@ -59,6 +59,8 @@
     <string name="error_open_capture">Unable to open the selected CAP file.</string>
     <string name="error_open_output">Unable to open the output file.</string>
     <string name="error_open_selected_file">Unable to open %1$s.</string>
+    <string name="error_capture_requires_mode_22000">CAP/PCAP input can only be passed to Hashcat in mode 22000 (WPA-PBKDF2-PMKID+EAPOL). Select mode 22000 or a text hash file for the current mode.</string>
+    <string name="error_capture_no_hc22000">No suitable M1+M2 pairs were found in the CAP/PCAP input to create hc22000 records.</string>
 
     <string name="hash_mode_dialog_title">Select hash mode</string>
     <string name="hash_mode_dialog_subtitle">Modes are grouped by their Hashcat category.</string>

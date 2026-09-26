@@ -886,11 +886,12 @@ class MainActivity : Activity()
                 val inputDirectory = File(cacheDir, "hashcat-input").apply {
                     mkdirs()
                 }
-                val hashFile = clipboardHashFile?.takeIf(File::isFile)
-                    ?: copyUriToFile(
-                        hashUri ?: error(getString(R.string.error_open_selected_file, "hash")),
-                        File(inputDirectory, "hashes.input")
-                    )
+                val hashFile = prepareHashInputFile(
+                    hashUri = hashUri,
+                    clipboardHashFile = clipboardHashFile,
+                    hashMode = hashMode,
+                    inputDirectory = inputDirectory
+                )
                 val source = if (candidateSource == CANDIDATE_SOURCE_TEMPLATE)
                 {
                     HashcatRunner.CandidateSource.Mask(
@@ -932,6 +933,60 @@ class MainActivity : Activity()
                     appendHashcatLog(
                         "ERROR: ${error.message ?: error.javaClass.simpleName}"
                     )
+                }
+            }
+        }
+    }
+
+    /**
+     * Resolves the actual text hash input passed to Hashcat. Classic capture
+     * containers selected as hash input are converted explicitly for mode 22000
+     * instead of being copied as binary data into hashes.input.
+     */
+    private fun prepareHashInputFile(
+        hashUri: Uri?,
+        clipboardHashFile: File?,
+        hashMode: Int,
+        inputDirectory: File
+    ): File
+    {
+        clipboardHashFile?.takeIf(File::isFile)?.let { file ->
+            return file
+        }
+
+        val uri = hashUri
+            ?: error(getString(R.string.error_open_selected_file, "hash"))
+        val sample = readSampleBytes(uri)
+        val isCapture = sample.startsWith(0xD4, 0xC3, 0xB2, 0xA1) ||
+            sample.startsWith(0xA1, 0xB2, 0xC3, 0xD4) ||
+            sample.startsWith(0x4D, 0x3C, 0xB2, 0xA1) ||
+            sample.startsWith(0xA1, 0xB2, 0x3C, 0x4D) ||
+            sample.startsWith(0x0A, 0x0D, 0x0D, 0x0A)
+
+        if (!isCapture)
+        {
+            return copyUriToFile(uri, File(inputDirectory, "hashes.input"))
+        }
+
+        if (hashMode != WPA_HASH_MODE)
+        {
+            error(getString(R.string.error_capture_requires_mode_22000))
+        }
+
+        val result = contentResolver.openInputStream(uri)?.use { input ->
+            CapToHc22000Converter().convert(input)
+        } ?: error(getString(R.string.error_open_capture))
+
+        if (result.lines.isEmpty())
+        {
+            error(getString(R.string.error_capture_no_hc22000))
+        }
+
+        return File(inputDirectory, "hashes.hc22000").apply {
+            bufferedWriter(Charsets.UTF_8).use { writer ->
+                result.lines.forEach { line ->
+                    writer.write(line)
+                    writer.newLine()
                 }
             }
         }
@@ -1581,7 +1636,8 @@ class MainActivity : Activity()
 
         const val CANDIDATE_SOURCE_TEMPLATE = "template"
         const val CANDIDATE_SOURCE_WORDLIST = "wordlist"
-        const val DEFAULT_HASH_MODE = 22000
+        const val WPA_HASH_MODE = 22000
+        const val DEFAULT_HASH_MODE = WPA_HASH_MODE
         const val DEFAULT_MASK_TEMPLATE = "?1?1?1?1?1?1?1?1"
         const val DEFAULT_MASK_CHARSET = "?l?d"
         const val DEFAULT_MASK_MIN_LENGTH = 8
