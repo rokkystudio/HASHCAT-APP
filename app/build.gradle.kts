@@ -15,10 +15,13 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Must stay in sync with the :hashcat module: the native payload is
-        // only produced for arm64-v8a.
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            abiFilters += listOf(
+                "arm64-v8a",
+                "armeabi-v7a",
+                "x86",
+                "x86_64"
+            )
         }
     }
 

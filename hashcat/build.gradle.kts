@@ -3,24 +3,24 @@ plugins {
 }
 
 val hashcatVersion = "7.1.2"
-val androidAbi = "arm64-v8a"
 val publishedAndroidAbis = listOf(
     "arm64-v8a",
     "armeabi-v7a",
     "x86",
     "x86_64"
 )
-val runtimeArchive = layout.projectDirectory.file(
-    "binaries/hashcat-v$hashcatVersion-android-$androidAbi.zip"
-)
-val publishedArchives = publishedAndroidAbis.map { abi ->
+val publishedArchives = publishedAndroidAbis.associateWith { abi ->
     layout.projectDirectory.file(
         "binaries/hashcat-v$hashcatVersion-android-$abi.zip"
     )
 }
+val publishedAndroidLibraries = publishedAndroidAbis.associateWith { abi ->
+    layout.projectDirectory.file("binaries/android-libs/$abi/liblzma.so")
+}
 val generatedRuntimeDir = layout.buildDirectory.dir("generated/hashcatRuntime")
 
 val missingPublishedArchives = publishedArchives
+    .values
     .map { it.asFile }
     .filterNot(File::isFile)
 
@@ -31,28 +31,46 @@ if (missingPublishedArchives.isNotEmpty()) {
     )
 }
 
-val prepareHashcatRuntime by tasks.registering(Copy::class) {
+val missingPublishedLibraries = publishedAndroidLibraries
+    .values
+    .map { it.asFile }
+    .filterNot(File::isFile)
+
+if (missingPublishedLibraries.isNotEmpty()) {
+    throw GradleException(
+        "HASHCAT-APP requires the published Android runtime libraries. Missing: " +
+            missingPublishedLibraries.joinToString { it.path }
+    )
+}
+
+val prepareHashcatRuntime by tasks.registering(Sync::class) {
     group = "build setup"
-    description = "Extracts the published Hashcat Android runtime into generated Android sources."
+    description = "Extracts every published Hashcat Android ABI into generated Android sources."
 
-    from(zipTree(runtimeArchive.asFile)) {
-        include(
-            "modules/**",
-            "bridges/**",
-            "feeds/**",
-            "OpenCL/**",
-            "rules/**",
-            "tunings/**",
-            "pcfg/**",
-            "hashcat.hcstat2"
-        )
-        into("assets/hashcat")
-    }
+    publishedArchives.forEach { (abi, archive) ->
+        from(zipTree(archive.asFile)) {
+            include(
+                "modules/**",
+                "bridges/**",
+                "feeds/**",
+                "OpenCL/**",
+                "rules/**",
+                "tunings/**",
+                "pcfg/**",
+                "hashcat.hcstat2"
+            )
+            into("assets/hashcat/$abi")
+        }
 
-    from(zipTree(runtimeArchive.asFile)) {
-        include("hashcat")
-        into("jniLibs/$androidAbi")
-        rename("hashcat", "libhashcat_exec.so")
+        from(zipTree(archive.asFile)) {
+            include("hashcat")
+            into("jniLibs/$abi")
+            rename("hashcat", "libhashcat_exec.so")
+        }
+
+        from(publishedAndroidLibraries.getValue(abi).asFile) {
+            into("jniLibs/$abi")
+        }
     }
 
     into(generatedRuntimeDir)
@@ -68,10 +86,8 @@ android {
         minSdk = 26
         consumerProguardFiles("consumer-rules.pro")
 
-        // The app currently ships the arm64-v8a runtime. All published Android
-        // Hashcat archives remain versioned under hashcat/binaries.
         ndk {
-            abiFilters += listOf(androidAbi)
+            abiFilters += publishedAndroidAbis
         }
     }
 

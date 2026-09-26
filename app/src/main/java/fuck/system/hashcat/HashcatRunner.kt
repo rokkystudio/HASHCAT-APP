@@ -1,6 +1,8 @@
 package fuck.system.hashcat
 
 import android.content.Context
+import android.os.Build
+import android.util.Log
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -16,12 +18,12 @@ import kotlin.concurrent.thread
  * into this APK through implementation(project(":hashcat")).
  *
  * The :hashcat module owns the published Android Hashcat archives under
- * hashcat/binaries and extracts the currently supported arm64-v8a runtime into
- * generated Android sources automatically during a normal Gradle build.
+ * hashcat/binaries and packages a matching executable and runtime tree for
+ * arm64-v8a, armeabi-v7a, x86 and x86_64.
  *
- * Hashcat resolves its shared directory from the executable location in
- * portable mode, so this runner copies the extracted .so and asset tree into a
- * private runtime directory before starting the process.
+ * The executable runs directly from Android's extracted native-library
+ * directory. Hashcat's writable shared tree is copied from APK assets into app
+ * storage and selected through HASHCAT_SHARED_FOLDER.
  */
 class HashcatRunner(
     private val context: Context
@@ -172,10 +174,32 @@ class HashcatRunner(
             put("TMPDIR", cacheDirectory.absolutePath)
             put("XDG_DATA_HOME", dataDirectory.absolutePath)
             put("XDG_CACHE_HOME", cacheDirectory.absolutePath)
-            putNativeLibraryPath(runtimeDirectory, nativeDirectory)
+            put("HASHCAT_SHARED_FOLDER", runtimeDirectory.absolutePath)
+            putNativeLibraryPath(
+                runtimeDirectory,
+                nativeDirectory,
+                resolveVendorNativeLibraryDirectory()
+            )
         }
 
-        val startedProcess = processBuilder.start()
+        Log.i(LOG_TAG, "Starting: ${command.joinToString(" ")}")
+        Log.d(
+            LOG_TAG,
+            "Runtime=${runtimeDirectory.absolutePath}, " +
+                "native=${nativeDirectory.absolutePath}, " +
+                "vendor=${resolveVendorNativeLibraryDirectory().absolutePath}"
+        )
+
+        val startedProcess = try
+        {
+            processBuilder.start()
+        }
+        catch (error: Throwable)
+        {
+            Log.e(LOG_TAG, "Failed to start Hashcat.", error)
+            throw error
+        }
+
         process = startedProcess
         listener.onStarted(command)
 
@@ -184,15 +208,18 @@ class HashcatRunner(
             {
                 startedProcess.inputStream.bufferedReader().useLines { lines ->
                     lines.forEach { line ->
+                        Log.i(LOG_TAG, line)
                         listener.onOutput(line)
                     }
                 }
 
                 val exitCode = startedProcess.waitFor()
+                Log.i(LOG_TAG, "Finished with exit code $exitCode")
                 listener.onFinished(exitCode)
             }
             catch (error: Throwable)
             {
+                Log.e(LOG_TAG, "Hashcat process failed.", error)
                 listener.onError(error)
             }
             finally
@@ -285,7 +312,8 @@ class HashcatRunner(
     }
 
     /**
-     * Prepares a writable portable Hashcat tree inside the app sandbox.
+     * Prepares Hashcat's writable shared runtime tree while keeping the
+     * executable in Android's install-time native library directory.
      */
     private fun prepareRuntime(): File
     {
@@ -293,32 +321,11 @@ class HashcatRunner(
             mkdirs()
         }
 
-        copyBundledExecutable(runtimeDirectory)
         copyHashcatSharedAssets(runtimeDirectory)
 
-        val executable = resolveRuntimeExecutable()
+        val executable = resolveBundledExecutable()
 
-        if (!executable.canExecute())
-        {
-            executable.setExecutable(true, false)
-        }
-
-        if (!executable.canExecute())
-        {
-            throw IOException("Hashcat runtime backend is not executable: ${executable.absolutePath}")
-        }
-
-        return executable
-    }
-
-    /**
-     * Copies the APK-extracted executable into the portable runtime directory.
-     */
-    private fun copyBundledExecutable(runtimeDirectory: File)
-    {
-        val source = resolveBundledExecutable()
-
-        if (!source.isFile)
+        if (!executable.isFile)
         {
             throw IOException(
                 "Native Hashcat backend is missing from the APK. " +
@@ -326,20 +333,12 @@ class HashcatRunner(
             )
         }
 
-        val target = File(runtimeDirectory, HASHCAT_EXECUTABLE_NAME)
-        val shouldCopy = !target.isFile ||
-            target.length() != source.length() ||
-            target.lastModified() < source.lastModified()
-
-        if (shouldCopy)
+        if (!executable.canExecute())
         {
-            source.inputStream().use { input ->
-                target.outputStream().use { output ->
-                    input.copyTo(output)
-                }
-            }
-            target.setLastModified(source.lastModified())
+            throw IOException("Packaged Hashcat backend is not executable: ${executable.absolutePath}")
         }
+
+        return executable
     }
 
     /**
@@ -348,7 +347,8 @@ class HashcatRunner(
      */
     private fun copyHashcatSharedAssets(runtimeDirectory: File)
     {
-        val rootEntries = context.assets.list(HASHCAT_ASSET_ROOT)
+        val assetRoot = resolveHashcatAssetRoot()
+        val rootEntries = context.assets.list(assetRoot)
             ?.filter { it.isNotBlank() }
             .orEmpty()
 
@@ -371,7 +371,7 @@ class HashcatRunner(
 
         rootEntries.forEach { entry ->
             copyAssetTree(
-                assetPath = "$HASHCAT_ASSET_ROOT/$entry",
+                assetPath = "$assetRoot/$entry",
                 target = File(runtimeDirectory, entry)
             )
         }
@@ -407,6 +407,22 @@ class HashcatRunner(
                 target = File(target, child)
             )
         }
+    }
+
+    /**
+     * Resolves the runtime asset subtree matching Android's selected native ABI.
+     */
+    private fun resolveHashcatAssetRoot(): String
+    {
+        val abi = Build.SUPPORTED_ABIS.firstOrNull { supportedAbi ->
+            context.assets.list("$HASHCAT_ASSET_ROOT/$supportedAbi")
+                ?.isNotEmpty() == true
+        } ?: throw IOException(
+            "No bundled Hashcat runtime matches this device ABI: " +
+                Build.SUPPORTED_ABIS.joinToString()
+        )
+
+        return "$HASHCAT_ASSET_ROOT/$abi"
     }
 
     /**
@@ -459,6 +475,23 @@ class HashcatRunner(
     }
 
     /**
+     * Resolves the vendor native-library directory matching this app process.
+     * Android devices commonly expose GPU OpenCL implementations from this
+     * directory, including vendor-public libOpenCL.so implementations.
+     */
+    private fun resolveVendorNativeLibraryDirectory(): File
+    {
+        return if (android.os.Process.is64Bit())
+        {
+            File("/vendor/lib64")
+        }
+        else
+        {
+            File("/vendor/lib")
+        }
+    }
+
+    /**
      * Prepends native library folders to LD_LIBRARY_PATH so companion native
      * dependencies can be placed in the runtime or jniLibs/<abi>/ directory.
      */
@@ -479,6 +512,7 @@ class HashcatRunner(
 
     private companion object
     {
+        const val LOG_TAG = "Hashcat"
         const val HASHCAT_EXECUTABLE_NAME = "libhashcat_exec.so"
         const val HASHCAT_ASSET_ROOT = "hashcat"
         const val ASSET_MARKER_FILE = ".hashcat-app-assets-version"

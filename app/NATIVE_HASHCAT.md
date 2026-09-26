@@ -19,12 +19,21 @@ and committed, a normal HASHCAT-APP Gradle build does not require running that
 external build again or performing a manual import step.
 
 The `:hashcat` module's `prepareHashcatRuntime` task automatically extracts
-the currently packaged `arm64-v8a` archive into generated Android sources:
+all four published Android archives into generated Android sources:
 
 ```text
-hashcat/build/generated/hashcatRuntime/jniLibs/arm64-v8a/libhashcat_exec.so
-hashcat/build/generated/hashcatRuntime/assets/hashcat/
+hashcat/build/generated/hashcatRuntime/jniLibs/<abi>/libhashcat_exec.so
+hashcat/build/generated/hashcatRuntime/assets/hashcat/<abi>/
 ```
+
+The generated tree contains `arm64-v8a`, `armeabi-v7a`, `x86` and
+`x86_64`. Runtime assets are kept ABI-specific because Hashcat's plugin
+modules are native binaries and must match the executable selected by Android.
+
+Each ABI also packages `liblzma.so` from XZ Utils 5.8.4 under
+`hashcat/binaries/android-libs/<abi>/`. Hashcat loads liblzma at runtime to
+read its compressed `hashcat.hcstat2` Markov statistics file. Gradle treats
+these four libraries as required published runtime dependencies.
 
 The executable is renamed from `hashcat` to `libhashcat_exec.so` so Android
 packages it as a native library. The shared runtime directories from the same
@@ -47,21 +56,27 @@ Gradle configuration fails immediately if any of the four published Android
 archives is missing. A HASHCAT-APP checkout without its published native
 payload is therefore not a valid build.
 
-At runtime `HashcatRunner` copies the APK-extracted executable and Hashcat
-assets into app-private storage before starting the portable runtime.
+At runtime `HashcatRunner` executes `libhashcat_exec.so` directly from
+Android's extracted native-library directory. The ABI-matched Hashcat shared
+runtime is copied from APK assets into `files/hashcat/runtime` and supplied to
+the native process through `HASHCAT_SHARED_FOLDER`.
+
+`LD_LIBRARY_PATH` contains the writable runtime, the app's extracted native
+library directory and the process-width vendor library directory
+(`/vendor/lib64` or `/vendor/lib`). The vendor directory is required on devices
+whose public GPU OpenCL implementation is provided as vendor `libOpenCL.so`.
+
+Hashcat's combined stdout/stderr stream is delivered to the in-app listener and
+mirrored to Android Logcat with tag `Hashcat`. Process start, exit and launch or
+stream failures are logged with the same tag.
 
 ## Android execution constraint
 
 Android 10+ does not allow an app targeting API 29+ to execute a binary copied
-into its writable app-data directory. The current Hashcat Android archive is a
-CLI executable that expects its shared runtime tree beside the executable, so
-the old copy-and-exec approach cannot be the final runtime architecture for
-this app. The Android build produced by the external HASHCAT project must
-either expose an app-supplied shared/runtime directory while the executable
-runs from Android's extracted native-library directory, or provide a native
-library/JNI entry point. This is separate from background extraction and the
-hash-mode UI.
+into its writable app-data directory. For that reason the executable remains in
+Android's install-time native-library directory; only Hashcat's shared runtime
+files are copied into writable app storage.
 
-The four ABI archives are published with the repository. The Android app
-currently targets `arm64-v8a`; enabling the other ABIs requires packaging each
-ABI's matching plugin/runtime tree instead of sharing the arm64 asset tree.
+The four ABI archives are published with the repository and the Android app
+packages all four ABIs. At runtime `HashcatRunner` selects the asset subtree
+matching the first supported ABI for which a bundled Hashcat runtime exists.
