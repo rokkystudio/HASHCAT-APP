@@ -8,6 +8,8 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.text.Editable
@@ -58,6 +60,16 @@ class MainActivity : Activity()
     private var maskMaxLength: Int = DEFAULT_MASK_MAX_LENGTH
     private var suppressMaskTextChange: Boolean = false
 
+    private val hashcatLogLock = Any()
+    private val hashcatLogHistory = ArrayDeque<String>()
+    private val hashcatLiveStatus = linkedMapOf<String, String>()
+    private val pendingHashcatLogLines = ArrayDeque<String>()
+    private val hashcatLogHandler = Handler(Looper.getMainLooper())
+    private var hashcatLogHistoryCharCount = 0
+    private var hashcatLogFlushScheduled = false
+    private var hashcatLogFollowTail = true
+    private val hashcatLogFlushRunnable = Runnable { flushHashcatLog() }
+
     /**
      * Applies the saved light or dark theme and application language before
      * Android inflates localized resources.
@@ -100,6 +112,14 @@ class MainActivity : Activity()
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        binding.hashcatLogScrollView.setOnScrollChangeListener { view, _, scrollY, _, _ ->
+            val child = binding.hashcatLogScrollView.getChildAt(0)
+            val maxScroll = ((child?.height ?: 0) - view.height).coerceAtLeast(0)
+            val bottomSlop = (HASHCAT_LOG_BOTTOM_SLOP_DP * resources.displayMetrics.density).toInt()
+
+            hashcatLogFollowTail = maxScroll - scrollY <= bottomSlop
+        }
 
         hashcatRunner = HashcatRunner(this)
         binding.hashModeButton.isEnabled = false
@@ -200,7 +220,7 @@ class MainActivity : Activity()
                 )
                 renderHashcatStatus()
                 appendHashcatLog(getString(R.string.hashcat_stopping))
-                hashcatRunner.stop()
+                hashcatRunner.stop("start/stop button")
             }
             else
             {
@@ -269,7 +289,11 @@ class MainActivity : Activity()
      */
     override fun onDestroy()
     {
-        hashcatRunner.stop()
+        hashcatLogHandler.removeCallbacks(hashcatLogFlushRunnable)
+        hashcatRunner.stop(
+            "MainActivity.onDestroy finishing=$isFinishing " +
+                "changingConfigurations=$isChangingConfigurations"
+        )
         super.onDestroy()
     }
 
@@ -1011,10 +1035,7 @@ class MainActivity : Activity()
 
             override fun onOutput(line: String)
             {
-                runOnUiThread {
-                    updateHashcatStatusFromOutput(line)
-                    appendHashcatLog(line)
-                }
+                appendHashcatLog(line)
             }
 
             override fun onFinished(exitCode: Int)
@@ -1056,17 +1077,17 @@ class MainActivity : Activity()
         }
     }
 
-    private fun updateHashcatStatusFromOutput(line: String)
+    private fun updateHashcatStatusFromOutput(line: String): Boolean
     {
         val label = line.substringBefore(':', "").trim()
         val value = line.substringAfter(':', "").trim()
 
         if (label.isEmpty() || value.isEmpty())
         {
-            return
+            return false
         }
 
-        hashcatStatus = when
+        val updated = when
         {
             label.startsWith("Status") -> hashcatStatus.copy(state = value)
             label.startsWith("Progress") -> hashcatStatus.copy(progress = value)
@@ -1081,10 +1102,12 @@ class MainActivity : Activity()
                 hashcatStatus.copy(speed = value)
             label.startsWith("Candidates.#") || label.startsWith("Candidate.Engine") ->
                 hashcatStatus.copy(currentKey = value)
-            else -> hashcatStatus
+            else -> return false
         }
 
-        renderHashcatStatus()
+        hashcatStatus = updated
+
+        return true
     }
 
     private fun extractParenthesizedTail(value: String): String?
@@ -1161,21 +1184,201 @@ class MainActivity : Activity()
 
     private fun clearHashcatLog()
     {
+        hashcatLogHandler.removeCallbacks(hashcatLogFlushRunnable)
+
+        synchronized(hashcatLogLock)
+        {
+            hashcatLogHistory.clear()
+            hashcatLiveStatus.clear()
+            pendingHashcatLogLines.clear()
+            hashcatLogHistoryCharCount = 0
+            hashcatLogFlushScheduled = false
+        }
+
+        hashcatLogFollowTail = true
         binding.hashcatLogTextView.text = ""
     }
 
     /**
-     * Appends one line to the in-app Hashcat log and mirrors the same line to
-     * Android Logcat under the Hashcat tag.
+     * Mirrors native output to Logcat immediately. The in-app view keeps startup
+     * and event history immutable while Hashcat's repeating status block is
+     * updated in place by field name. This avoids growing the TextView every
+     * second and preserves the user's scroll position while they inspect history.
      */
     private fun appendHashcatLog(line: String)
     {
         android.util.Log.i("Hashcat", line)
-        binding.hashcatLogTextView.append(line)
-        binding.hashcatLogTextView.append("\n")
-        binding.hashcatLogScrollView.post {
-            binding.hashcatLogScrollView.fullScroll(View.FOCUS_DOWN)
+
+        var scheduleFlush = false
+
+        synchronized(hashcatLogLock)
+        {
+            pendingHashcatLogLines.addLast(line)
+
+            if (!hashcatLogFlushScheduled)
+            {
+                hashcatLogFlushScheduled = true
+                scheduleFlush = true
+            }
         }
+
+        if (scheduleFlush)
+        {
+            hashcatLogHandler.postDelayed(
+                hashcatLogFlushRunnable,
+                HASHCAT_LOG_FLUSH_DELAY_MS
+            )
+        }
+    }
+
+    private fun flushHashcatLog()
+    {
+        val pending = ArrayList<String>()
+
+        synchronized(hashcatLogLock)
+        {
+            while (pendingHashcatLogLines.isNotEmpty())
+            {
+                pending += pendingHashcatLogLines.removeFirst()
+            }
+
+            hashcatLogFlushScheduled = false
+        }
+
+        if (pending.isEmpty())
+        {
+            return
+        }
+
+        var statusChanged = false
+
+        pending.forEach { line ->
+            if (updateHashcatStatusFromOutput(line))
+            {
+                statusChanged = true
+            }
+
+            val statusKey = hashcatLiveStatusKey(line)
+
+            when
+            {
+                statusKey != null -> hashcatLiveStatus[statusKey] = line
+                isHashcatStatusPrompt(line) -> Unit
+                line.isBlank() && hashcatLiveStatus.isNotEmpty() -> Unit
+                else -> appendHashcatHistoryLine(line)
+            }
+        }
+
+        if (statusChanged)
+        {
+            renderHashcatStatus()
+        }
+
+        trimHashcatHistory()
+
+        val estimatedChars = hashcatLogHistoryCharCount +
+            hashcatLiveStatus.values.sumOf { it.length + 1 } + 2
+
+        binding.hashcatLogTextView.text = buildString(estimatedChars) {
+            hashcatLogHistory.forEach { line ->
+                append(line)
+                append('\n')
+            }
+
+            if (hashcatLiveStatus.isNotEmpty())
+            {
+                if (isNotEmpty() && this[lastIndex] != '\n') append('\n')
+                append('\n')
+
+                hashcatLiveStatus.values.forEach { line ->
+                    append(line)
+                    append('\n')
+                }
+            }
+        }
+
+        if (hashcatLogFollowTail)
+        {
+            binding.hashcatLogScrollView.post {
+                if (hashcatLogFollowTail)
+                {
+                    binding.hashcatLogScrollView.fullScroll(View.FOCUS_DOWN)
+                }
+            }
+        }
+
+        var scheduleNextFlush = false
+
+        synchronized(hashcatLogLock)
+        {
+            if (pendingHashcatLogLines.isNotEmpty() && !hashcatLogFlushScheduled)
+            {
+                hashcatLogFlushScheduled = true
+                scheduleNextFlush = true
+            }
+        }
+
+        if (scheduleNextFlush)
+        {
+            hashcatLogHandler.postDelayed(
+                hashcatLogFlushRunnable,
+                HASHCAT_LOG_FLUSH_DELAY_MS
+            )
+        }
+    }
+
+    private fun appendHashcatHistoryLine(line: String)
+    {
+        hashcatLogHistory.addLast(line)
+        hashcatLogHistoryCharCount += line.length + 1
+    }
+
+    private fun trimHashcatHistory()
+    {
+        val liveLines = hashcatLiveStatus.size
+        val maxHistoryLines = (MAX_HASHCAT_LOG_LINES - liveLines).coerceAtLeast(0)
+
+        while (
+            hashcatLogHistory.size > maxHistoryLines ||
+            hashcatLogHistoryCharCount > MAX_HASHCAT_LOG_CHARS
+        )
+        {
+            val removed = hashcatLogHistory.removeFirst()
+            hashcatLogHistoryCharCount -= removed.length + 1
+        }
+    }
+
+    private fun hashcatLiveStatusKey(line: String): String?
+    {
+        val rawLabel = line.substringBefore(':', "").trim()
+
+        if (rawLabel.isEmpty()) return null
+
+        val label = rawLabel.trimEnd('.')
+
+        val live = label == "Session" ||
+            label == "Status" ||
+            label == "Hash.Mode" ||
+            label == "Hash.Target" ||
+            label == "Time.Started" ||
+            label == "Time.Estimated" ||
+            label == "Kernel.Feature" ||
+            label.startsWith("Guess.") ||
+            label.startsWith("Speed.") ||
+            label == "Recovered" ||
+            label == "Progress" ||
+            label == "Rejected" ||
+            label.startsWith("Restore.") ||
+            label == "Candidate.Engine" ||
+            label.startsWith("Candidates.") ||
+            label.startsWith("Hardware.Mon.")
+
+        return if (live) label else null
+    }
+
+    private fun isHashcatStatusPrompt(line: String): Boolean
+    {
+        return line.startsWith("[s]tatus [p]ause")
     }
 
     private fun setConverterBusy(busy: Boolean)
@@ -1648,5 +1851,10 @@ class MainActivity : Activity()
         const val DEFAULT_MASK_MIN_LENGTH = 8
         const val DEFAULT_MASK_MAX_LENGTH = 8
         const val MAX_SAMPLE_BYTES = 65536
+
+        const val MAX_HASHCAT_LOG_LINES = 300
+        const val MAX_HASHCAT_LOG_CHARS = 128 * 1024
+        const val HASHCAT_LOG_FLUSH_DELAY_MS = 250L
+        const val HASHCAT_LOG_BOTTOM_SLOP_DP = 32
     }
 }

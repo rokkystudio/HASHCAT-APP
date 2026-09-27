@@ -310,9 +310,11 @@ class HashcatRunner(
      * Requests termination of the current native process and kills it if it does
      * not exit quickly after the graceful signal.
      */
-    fun stop()
+    fun stop(reason: String = "unspecified")
     {
         val activeProcess = process ?: return
+
+        Log.w(LOG_TAG, "Stop requested: $reason")
         stopRequested = true
 
         thread(name = "hashcat-stop") {
