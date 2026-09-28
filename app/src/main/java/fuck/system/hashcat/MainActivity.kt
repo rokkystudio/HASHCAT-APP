@@ -371,6 +371,7 @@ class MainActivity : Activity()
             }
             renderCandidateSource()
             updateHashcatStartState()
+            saveHashcatPreferences()
         }
 
         binding.maskTemplateEditText.addTextChangedListener(object : TextWatcher
@@ -400,6 +401,7 @@ class MainActivity : Activity()
                     maskTemplate = text?.toString().orEmpty()
                     renderCandidateInfo()
                     updateHashcatStartState()
+                    saveHashcatPreferences()
                 }
             }
         })
@@ -686,6 +688,7 @@ class MainActivity : Activity()
     {
         if (savedInstanceState == null)
         {
+            restoreHashcatPreferences()
             return
         }
 
@@ -880,6 +883,7 @@ class MainActivity : Activity()
         )
         describeWordlistUri(uri)
         renderCandidateSource()
+        saveHashcatPreferences()
 
         updateHashcatStartState()
     }
@@ -1067,6 +1071,7 @@ class MainActivity : Activity()
         ) { mode ->
             selectedHashMode = mode.mode
             renderSelectedHashMode()
+            saveHashcatPreferences()
         }.show()
     }
 
@@ -1108,6 +1113,7 @@ class MainActivity : Activity()
             maskMaxLength = settings.maxLength
             renderCandidateSource()
             updateHashcatStartState()
+            saveHashcatPreferences()
         }.show()
     }
 
@@ -1198,6 +1204,12 @@ class MainActivity : Activity()
                 {
                     val wordlistUri = selectedWordlistUri
                         ?: error(getString(R.string.no_wordlist_selected))
+                    if (!hasReadableFile(wordlistUri))
+                    {
+                        selectedWordlistUri = null
+                        saveHashcatPreferences()
+                        error(getString(R.string.wordlist_missing))
+                    }
                     HashcatRunner.CandidateSource.Wordlist(
                         copyUriToFile(
                             wordlistUri,
