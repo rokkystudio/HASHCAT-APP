@@ -1548,7 +1548,7 @@ class MainActivity : Activity()
      */
     private fun appendHashcatLog(line: String)
     {
-        android.util.Log.i("Hashcat", line)
+        appendHashcatLogcat(line)
 
         var scheduleFlush = false
 
@@ -1569,6 +1569,34 @@ class MainActivity : Activity()
                 hashcatLogFlushRunnable,
                 HASHCAT_LOG_FLUSH_DELAY_MS
             )
+        }
+    }
+
+    /**
+     * Writes complete Hashcat output to Logcat by splitting records that exceed
+     * Android's practical single-message size.
+     */
+    private fun appendHashcatLogcat(line: String)
+    {
+        if (line.length <= LOGCAT_MESSAGE_CHARS)
+        {
+            android.util.Log.i("Hashcat", line)
+            return
+        }
+
+        val totalParts = (line.length + LOGCAT_MESSAGE_CHARS - 1) / LOGCAT_MESSAGE_CHARS
+        var offset = 0
+        var part = 1
+
+        while (offset < line.length)
+        {
+            val end = (offset + LOGCAT_MESSAGE_CHARS).coerceAtMost(line.length)
+            android.util.Log.i(
+                "Hashcat",
+                "[$part/$totalParts] " + line.substring(offset, end)
+            )
+            offset = end
+            part++
         }
     }
 
@@ -2206,6 +2234,7 @@ class MainActivity : Activity()
 
         const val MAX_HASHCAT_LOG_LINES = 300
         const val MAX_HASHCAT_LOG_CHARS = 128 * 1024
+        const val LOGCAT_MESSAGE_CHARS = 3500
         const val HASHCAT_LOG_FLUSH_DELAY_MS = 250L
         const val HASHCAT_STATUS_TICK_MS = 1000L
         const val HASHCAT_LOG_BOTTOM_SLOP_DP = 32

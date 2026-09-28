@@ -227,11 +227,7 @@ class HashcatRunner(
         thread(name = "hashcat-output") {
             try
             {
-                startedProcess.inputStream.bufferedReader().useLines { lines ->
-                    lines.forEach { line ->
-                        listener.onOutput(line)
-                    }
-                }
+                readProcessOutput(startedProcess, listener)
 
                 val exitCode = startedProcess.waitFor()
                 Log.i(LOG_TAG, "Finished with exit code $exitCode")
@@ -260,6 +256,68 @@ class HashcatRunner(
                 }
             }
         }
+    }
+
+    /**
+     * Reads Hashcat output as raw characters and emits records separated by LF or CR.
+     * Hashcat writes several startup and status messages without regular line feeds,
+     * so relying on readLine() can merge unrelated messages and delay partial output.
+     */
+    private fun readProcessOutput(startedProcess: Process, listener: Listener)
+    {
+        val reader = startedProcess.inputStream.reader()
+        val buffer = CharArray(OUTPUT_BUFFER_CHARS)
+        val pending = StringBuilder()
+        var previousWasCarriageReturn = false
+
+        while (true)
+        {
+            val count = reader.read(buffer)
+            if (count < 0)
+            {
+                break
+            }
+
+            for (index in 0 until count)
+            {
+                when (val character = buffer[index])
+                {
+                    '\r', '\n' ->
+                    {
+                        if (character == '\n' && previousWasCarriageReturn)
+                        {
+                            previousWasCarriageReturn = false
+                            continue
+                        }
+
+                        emitProcessOutputRecord(pending, listener)
+                        previousWasCarriageReturn = character == '\r'
+                    }
+
+                    else ->
+                    {
+                        previousWasCarriageReturn = false
+                        pending.append(character)
+
+                        if (pending.length >= MAX_OUTPUT_RECORD_CHARS)
+                        {
+                            emitProcessOutputRecord(pending, listener)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (pending.isNotEmpty())
+        {
+            emitProcessOutputRecord(pending, listener)
+        }
+    }
+
+    private fun emitProcessOutputRecord(pending: StringBuilder, listener: Listener)
+    {
+        listener.onOutput(pending.toString())
+        pending.setLength(0)
     }
 
     private fun buildCommand(
@@ -589,6 +647,8 @@ class HashcatRunner(
         const val ASSET_MARKER_FILE = ".hashcat-app-assets-version"
         const val STOP_TIMEOUT_SECONDS = 2L
         const val FORCE_STOP_TIMEOUT_SECONDS = 2L
+        const val OUTPUT_BUFFER_CHARS = 4096
+        const val MAX_OUTPUT_RECORD_CHARS = 3500
         const val HASH_MODE_CATALOG = "hashcat-modes.json"
     }
 }
