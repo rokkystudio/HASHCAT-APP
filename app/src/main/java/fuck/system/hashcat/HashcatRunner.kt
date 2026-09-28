@@ -79,6 +79,9 @@ class HashcatRunner(
     @Volatile
     private var stopRequested: Boolean = false
 
+    @Volatile
+    private var stoppingProcess: Process? = null
+
     /**
      * Returns true while the native Hashcat process is alive.
      */
@@ -147,7 +150,14 @@ class HashcatRunner(
             throw IllegalStateException("Hashcat is already running.")
         }
 
+        stopRequested = false
+
         val executable = prepareRuntime()
+
+        if (stopRequested)
+        {
+            throw InterruptedIOException("Hashcat start was cancelled before process launch.")
+        }
         val runtimeDirectory = resolveRuntimeDirectory()
         val nativeDirectory = resolveNativeLibraryDirectory()
 
@@ -207,8 +217,12 @@ class HashcatRunner(
         }
 
         process = startedProcess
-        stopRequested = false
         listener.onStarted(command)
+
+        if (stopRequested)
+        {
+            stop("stop requested while native process was launching")
+        }
 
         thread(name = "hashcat-output") {
             try
@@ -312,17 +326,58 @@ class HashcatRunner(
      */
     fun stop(reason: String = "unspecified")
     {
-        val activeProcess = process ?: return
-
-        Log.w(LOG_TAG, "Stop requested: $reason")
         stopRequested = true
 
-        thread(name = "hashcat-stop") {
-            activeProcess.destroy()
+        val activeProcess = process
 
-            if (!activeProcess.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        if (activeProcess == null)
+        {
+            Log.i(LOG_TAG, "Stop requested before native process launch: $reason")
+            return
+        }
+
+        synchronized(this)
+        {
+            if (stoppingProcess === activeProcess)
             {
-                activeProcess.destroyForcibly()
+                Log.i(LOG_TAG, "Stop already in progress: $reason")
+                return
+            }
+
+            stoppingProcess = activeProcess
+        }
+
+        Log.w(LOG_TAG, "Stop requested: $reason")
+
+        thread(name = "hashcat-stop") {
+            try
+            {
+                activeProcess.destroy()
+
+                if (!activeProcess.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+                {
+                    Log.w(LOG_TAG, "Graceful stop timed out; killing Hashcat.")
+                    activeProcess.destroyForcibly()
+
+                    if (!activeProcess.waitFor(FORCE_STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+                    {
+                        Log.e(LOG_TAG, "Hashcat is still alive after destroyForcibly().")
+                    }
+                }
+
+                runCatching { activeProcess.inputStream.close() }
+                runCatching { activeProcess.outputStream.close() }
+                runCatching { activeProcess.errorStream.close() }
+            }
+            finally
+            {
+                synchronized(this)
+                {
+                    if (stoppingProcess === activeProcess)
+                    {
+                        stoppingProcess = null
+                    }
+                }
             }
         }
     }
@@ -533,6 +588,7 @@ class HashcatRunner(
         const val HASHCAT_ASSET_ROOT = "hashcat"
         const val ASSET_MARKER_FILE = ".hashcat-app-assets-version"
         const val STOP_TIMEOUT_SECONDS = 2L
+        const val FORCE_STOP_TIMEOUT_SECONDS = 2L
         const val HASH_MODE_CATALOG = "hashcat-modes.json"
     }
 }

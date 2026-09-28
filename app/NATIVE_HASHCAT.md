@@ -68,10 +68,21 @@ Gradle configuration fails immediately if any of the four published Android
 archives is missing. A HASHCAT-APP checkout without its published native
 payload is therefore not a valid build.
 
-At runtime `HashcatRunner` executes `libhashcat_exec.so` directly from
-Android's extracted native-library directory. The ABI-matched Hashcat shared
-runtime is copied from APK assets into `files/hashcat/runtime` and supplied to
-the native process through `HASHCAT_SHARED_FOLDER`.
+At runtime `HashcatForegroundService` owns the active audit and enters Android
+foreground-service state before delegating native process launch to
+`HashcatRunner`. The service uses the `specialUse` foreground-service type,
+keeps an ongoing notification with a Stop action and remains active if the
+activity leaves the foreground. `HashcatRunner` executes `libhashcat_exec.so`
+directly from Android's extracted native-library directory. The ABI-matched
+Hashcat shared runtime is copied from APK assets into `files/hashcat/runtime`
+and supplied to the native process through `HASHCAT_SHARED_FOLDER`.
+
+The UI tracks input preparation, native startup, running and stopping as
+separate states. The first native backend initialization can take noticeably
+longer than later starts, so the status card and notification explicitly show
+the initialization phase. Stop is idempotent: after the first request the
+Start/Stop button remains disabled until the active native process has actually
+terminated, preventing a second launch from racing the old process.
 
 `LD_LIBRARY_PATH` contains the writable runtime, the app's extracted native
 library directory and the process-width vendor library directory

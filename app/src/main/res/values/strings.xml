@@ -26,8 +26,11 @@
     <string name="stop_hashcat">Стоп</string>
     <string name="clear_log">Очистить</string>
     <string name="hashcat_log_empty">Лог Hashcat\n</string>
+    <string name="wordlist_missing">Последний словарь недоступен, выберите новый файл.</string>
     <string name="hashcat_preparing">Подготовка входных файлов…</string>
+    <string name="hashcat_starting_backend">Запуск Hashcat и инициализация вычислительного backend. Первый запуск может занять заметное время — это нормально.</string>
     <string name="hashcat_stopping">Остановка Hashcat…</string>
+    <string name="hashcat_stopped">Hashcat остановлен.</string>
     <string name="hashcat_finished">Hashcat завершён, exit code: %1$d</string>
     <string name="hashcat_result_saved">Найденный результат сохранён: %1$s</string>
     <string name="hashcat_log_title">Лог Hashcat</string>
@@ -35,12 +38,21 @@
     <string name="hashcat_status_title">Статус Hashcat</string>
     <string name="hashcat_status_idle_value">Ожидание</string>
     <string name="hashcat_status_preparing">Подготовка</string>
+    <string name="hashcat_status_starting">Инициализация backend — первый запуск может занять время</string>
     <string name="hashcat_status_running">Запущен</string>
-    <string name="hashcat_status_stopping">Остановка</string>
+    <string name="hashcat_status_stopping">Остановка — дождитесь завершения</string>
+    <string name="hashcat_status_stopped">Остановлен</string>
     <string name="hashcat_status_finished">Завершён</string>
     <string name="hashcat_status_error">Ошибка</string>
     <string name="hashcat_status_idle">Статус: Ожидание\nПрогресс: —\nТекущий ключ: —\nВремя работы: —\nОсталось: —\nСкорость: —\nНайдено: —</string>
     <string name="hashcat_status_format">Статус: %1$s\nПрогресс: %2$s\nТекущий ключ: %3$s\nВремя работы: %4$s\nОсталось: %5$s\nСкорость: %6$s\nНайдено: %7$s</string>
+    <string name="hashcat_notification_channel">Выполнение Hashcat</string>
+    <string name="hashcat_notification_channel_description">Статус активной задачи Hashcat и управление остановкой.</string>
+    <string name="hashcat_notification_title">Hashcat работает</string>
+    <string name="hashcat_notification_idle">Ожидание задачи</string>
+    <string name="hashcat_notification_starting">Запуск и инициализация backend…</string>
+    <string name="hashcat_notification_running">Аудит выполняется</string>
+    <string name="hashcat_notification_stopping">Остановка задачи…</string>
 
     <string name="converter_title">CAP → hc22000</string>
     <string name="converter_description">Поддерживается обычный libpcap от airodump-ng с 802.11 или Radiotap кадрами. Конвертер формирует WPA*02 для пар M1+M2 с совпадающим replay counter.</string>

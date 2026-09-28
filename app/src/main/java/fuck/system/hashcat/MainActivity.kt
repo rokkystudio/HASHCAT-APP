@@ -1,15 +1,21 @@
 package fuck.system.hashcat
 
+import android.Manifest
 import android.app.Activity
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.IBinder
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.text.Editable
@@ -41,6 +47,10 @@ class MainActivity : Activity()
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var hashcatRunner: HashcatRunner
+    private var hashcatService: HashcatForegroundService? = null
+    private var hashcatServiceBound: Boolean = false
+    private var hashcatServiceState: HashcatForegroundService.State =
+        HashcatForegroundService.State.IDLE
 
     private var selectedCaptureUri: Uri? = null
     private var selectedHashUri: Uri? = null
@@ -60,6 +70,15 @@ class MainActivity : Activity()
     private var maskMaxLength: Int = DEFAULT_MASK_MAX_LENGTH
     private var suppressMaskTextChange: Boolean = false
 
+    @Volatile
+    private var hashcatInputPreparationActive: Boolean = false
+
+    @Volatile
+    private var hashcatInputPreparationStopRequested: Boolean = false
+
+    @Volatile
+    private var hashcatInputPreparationThread: Thread? = null
+
     private val hashcatLogLock = Any()
     private val hashcatLogHistory = ArrayDeque<String>()
     private val hashcatLiveStatus = linkedMapOf<String, String>()
@@ -69,6 +88,187 @@ class MainActivity : Activity()
     private var hashcatLogFlushScheduled = false
     private var hashcatLogFollowTail = true
     private val hashcatLogFlushRunnable = Runnable { flushHashcatLog() }
+    private val hashcatStatusTickRunnable = object : Runnable
+    {
+        override fun run()
+        {
+            if (!isHashcatBusy())
+            {
+                return
+            }
+
+            renderHashcatStatus()
+            hashcatLogHandler.postDelayed(this, HASHCAT_STATUS_TICK_MS)
+        }
+    }
+
+    private val hashcatServiceListener = object : HashcatForegroundService.Listener
+    {
+        override fun onStateChanged(state: HashcatForegroundService.State)
+        {
+            runOnUiThread {
+                if (isDestroyed)
+                {
+                    return@runOnUiThread
+                }
+
+                hashcatServiceState = state
+
+                when (state)
+                {
+                    HashcatForegroundService.State.STARTING ->
+                    {
+                        if (!hashcatInputPreparationActive)
+                        {
+                            hashcatStatus = hashcatStatus.copy(
+                                state = getString(R.string.hashcat_status_starting)
+                            )
+                            renderHashcatStatus()
+                        }
+                    }
+
+                    HashcatForegroundService.State.RUNNING ->
+                    {
+                        hashcatStatus = hashcatStatus.copy(
+                            state = getString(R.string.hashcat_status_running)
+                        )
+                        renderHashcatStatus()
+                    }
+
+                    HashcatForegroundService.State.STOPPING ->
+                    {
+                        hashcatStatus = hashcatStatus.copy(
+                            state = getString(R.string.hashcat_status_stopping)
+                        )
+                        renderHashcatStatus()
+                    }
+
+                    HashcatForegroundService.State.IDLE -> Unit
+                }
+
+                renderHashcatExecutionControls()
+
+                if (state != HashcatForegroundService.State.IDLE)
+                {
+                    startHashcatStatusTicker()
+                }
+            }
+        }
+
+        override fun onStarted(command: List<String>)
+        {
+            runOnUiThread {
+                if (isDestroyed)
+                {
+                    return@runOnUiThread
+                }
+
+                appendHashcatLog(
+                    "$ " + command.joinToString(" ")
+                )
+            }
+        }
+
+        override fun onOutput(line: String)
+        {
+            appendHashcatLog(line)
+        }
+
+        override fun onFinished(exitCode: Int, recoveredFile: File)
+        {
+            runOnUiThread {
+                if (isDestroyed)
+                {
+                    return@runOnUiThread
+                }
+
+                hashcatServiceState = HashcatForegroundService.State.IDLE
+                hashcatStatus = hashcatStatus.copy(
+                    state = getString(R.string.hashcat_status_finished)
+                )
+                renderHashcatStatus()
+                stopHashcatStatusTicker()
+                renderHashcatExecutionControls()
+                appendHashcatLog(
+                    getString(R.string.hashcat_finished, exitCode)
+                )
+
+                if (exitCode == 0 && recoveredFile.isFile && recoveredFile.length() > 0L)
+                {
+                    appendHashcatLog(
+                        getString(
+                            R.string.hashcat_result_saved,
+                            recoveredFile.absolutePath
+                        )
+                    )
+                }
+            }
+        }
+
+        override fun onStopped(exitCode: Int?)
+        {
+            runOnUiThread {
+                if (isDestroyed)
+                {
+                    return@runOnUiThread
+                }
+
+                hashcatServiceState = HashcatForegroundService.State.IDLE
+                hashcatStatus = hashcatStatus.copy(
+                    state = getString(R.string.hashcat_status_stopped)
+                )
+                renderHashcatStatus()
+                stopHashcatStatusTicker()
+                renderHashcatExecutionControls()
+                appendHashcatLog(getString(R.string.hashcat_stopped))
+            }
+        }
+
+        override fun onError(error: Throwable)
+        {
+            runOnUiThread {
+                if (isDestroyed)
+                {
+                    return@runOnUiThread
+                }
+
+                hashcatServiceState = HashcatForegroundService.State.IDLE
+                hashcatStatus = hashcatStatus.copy(
+                    state = getString(R.string.hashcat_status_error)
+                )
+                renderHashcatStatus()
+                stopHashcatStatusTicker()
+                renderHashcatExecutionControls()
+                appendHashcatLog(
+                    "ERROR: ${error.message ?: error.javaClass.simpleName}"
+                )
+            }
+        }
+    }
+
+    private val hashcatServiceConnection = object : ServiceConnection
+    {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?)
+        {
+            val service = (binder as? HashcatForegroundService.LocalBinder)
+                ?.service()
+                ?: return
+
+            hashcatService = service
+            hashcatServiceBound = true
+            hashcatServiceState = service.currentState()
+            service.setListener(hashcatServiceListener)
+            renderHashcatExecutionControls()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?)
+        {
+            hashcatService = null
+            hashcatServiceBound = false
+            hashcatServiceState = HashcatForegroundService.State.IDLE
+            renderHashcatExecutionControls()
+        }
+    }
 
     /**
      * Applies the saved light or dark theme and application language before
@@ -213,18 +413,22 @@ class MainActivity : Activity()
         }
 
         binding.startHashcatButton.setOnClickListener {
-            if (hashcatRunner.isRunning())
+            when
             {
-                hashcatStatus = hashcatStatus.copy(
-                    state = getString(R.string.hashcat_status_stopping)
-                )
-                renderHashcatStatus()
-                appendHashcatLog(getString(R.string.hashcat_stopping))
-                hashcatRunner.stop("start/stop button")
-            }
-            else
-            {
-                startHashcat()
+                hashcatInputPreparationActive ->
+                {
+                    requestHashcatStopDuringPreparation()
+                }
+
+                hashcatServiceState == HashcatForegroundService.State.STARTING ||
+                    hashcatServiceState == HashcatForegroundService.State.RUNNING ->
+                {
+                    requestHashcatStop()
+                }
+
+                hashcatServiceState == HashcatForegroundService.State.STOPPING -> Unit
+
+                else -> startHashcat()
             }
         }
 
@@ -270,6 +474,37 @@ class MainActivity : Activity()
     }
 
     /**
+     * Binds the visible activity to the process-owning foreground service.
+     */
+    override fun onStart()
+    {
+        super.onStart()
+
+        bindService(
+            Intent(this, HashcatForegroundService::class.java),
+            hashcatServiceConnection,
+            Context.BIND_AUTO_CREATE
+        )
+    }
+
+    /**
+     * Detaches UI callbacks while keeping an active foreground Hashcat job
+     * running independently of the activity lifecycle.
+     */
+    override fun onStop()
+    {
+        if (hashcatServiceBound)
+        {
+            hashcatService?.clearListener(hashcatServiceListener)
+            unbindService(hashcatServiceConnection)
+            hashcatServiceBound = false
+            hashcatService = null
+        }
+
+        super.onStop()
+    }
+
+    /**
      * Returns from secondary screens to the main Hashcat screen before
      * delegating the system Back action to Android.
      */
@@ -285,15 +520,13 @@ class MainActivity : Activity()
     }
 
     /**
-     * Stops a native Hashcat process when this Activity is destroyed.
+     * Releases activity-only callbacks. An active Hashcat job belongs to the
+     * foreground service and is intentionally not stopped here.
      */
     override fun onDestroy()
     {
         hashcatLogHandler.removeCallbacks(hashcatLogFlushRunnable)
-        hashcatRunner.stop(
-            "MainActivity.onDestroy finishing=$isFinishing " +
-                "changingConfigurations=$isChangingConfigurations"
-        )
+        hashcatLogHandler.removeCallbacks(hashcatStatusTickRunnable)
         super.onDestroy()
     }
 
@@ -311,6 +544,37 @@ class MainActivity : Activity()
             REQUEST_CREATE_OUTPUT -> handleOutputSelection(resultCode, data)
             REQUEST_OPEN_HASH_FILE -> handleHashFileSelection(resultCode, data)
             REQUEST_OPEN_WORDLIST -> handleWordlistSelection(resultCode, data)
+        }
+    }
+
+    private fun saveHashcatPreferences() {
+        getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(PREFERENCE_HASH_MODE, selectedHashMode)
+            .putString(PREFERENCE_CANDIDATE_SOURCE, candidateSource)
+            .putString(PREFERENCE_MASK_TEMPLATE, maskTemplate)
+            .putString(PREFERENCE_WORDLIST_URI, selectedWordlistUri?.toString())
+            .apply()
+    }
+
+    private fun restoreHashcatPreferences() {
+        val preferences = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+        selectedHashMode = preferences.getInt(PREFERENCE_HASH_MODE, DEFAULT_HASH_MODE)
+        candidateSource = preferences.getString(PREFERENCE_CANDIDATE_SOURCE, CANDIDATE_SOURCE_TEMPLATE) ?: CANDIDATE_SOURCE_TEMPLATE
+        maskTemplate = preferences.getString(PREFERENCE_MASK_TEMPLATE, DEFAULT_MASK_TEMPLATE) ?: DEFAULT_MASK_TEMPLATE
+        selectedWordlistUri = preferences.getString(PREFERENCE_WORDLIST_URI, null)?.let(Uri::parse)
+        if (selectedWordlistUri != null && !hasReadableFile(selectedWordlistUri!!)) {
+            selectedWordlistUri = null
+            appendHashcatLog(getString(R.string.wordlist_missing))
+        }
+    }
+
+    private fun hasReadableFile(uri: Uri): Boolean {
+        return try {
+            contentResolver.openInputStream(uri)?.use { }
+            true
+        } catch (_: Throwable) {
+            false
         }
     }
 
@@ -825,7 +1089,7 @@ class MainActivity : Activity()
             this,
             mode
         )
-        binding.hashModeButton.isEnabled = !hashcatRunner.isRunning()
+        binding.hashModeButton.isEnabled = !isHashcatBusy()
     }
 
     private fun showMaskAssistant()
@@ -859,9 +1123,9 @@ class MainActivity : Activity()
         binding.wordlistFileTextView.visibility = if (useTemplate) View.GONE else View.VISIBLE
         binding.wordlistFileInfoTextView.visibility = if (useTemplate) View.GONE else View.VISIBLE
         binding.selectWordlistButton.visibility = if (useTemplate) View.GONE else View.VISIBLE
-        binding.maskTemplateEditText.isEnabled = useTemplate && !hashcatRunner.isRunning()
-        binding.maskAssistantButton.isEnabled = useTemplate && !hashcatRunner.isRunning()
-        binding.selectWordlistButton.isEnabled = !useTemplate && !hashcatRunner.isRunning()
+        binding.maskTemplateEditText.isEnabled = useTemplate && !isHashcatBusy()
+        binding.maskAssistantButton.isEnabled = useTemplate && !isHashcatBusy()
+        binding.selectWordlistButton.isEnabled = !useTemplate && !isHashcatBusy()
 
         if (binding.maskTemplateEditText.text.toString() != maskTemplate)
         {
@@ -886,6 +1150,7 @@ class MainActivity : Activity()
 
     private fun startHashcat()
     {
+        val service = hashcatService ?: return
         val hashUri = selectedHashUri
         val clipboardHashFile = selectedHashClipboardFile
         val hashMode = selectedHashMode
@@ -895,16 +1160,20 @@ class MainActivity : Activity()
             return
         }
 
+        requestHashcatNotificationPermissionIfNeeded()
         clearHashcatLog()
         hashcatStartedAtRealtime = SystemClock.elapsedRealtime()
+        hashcatInputPreparationStopRequested = false
+        hashcatInputPreparationActive = true
         hashcatStatus = HashcatStatus(
             state = getString(R.string.hashcat_status_preparing)
         )
         renderHashcatStatus()
-        setHashcatBusy(true)
+        renderHashcatExecutionControls()
+        startHashcatStatusTicker()
         appendHashcatLog(getString(R.string.hashcat_preparing))
 
-        thread(name = "hashcat-input-copy") {
+        hashcatInputPreparationThread = thread(name = "hashcat-input-copy") {
             try
             {
                 val inputDirectory = File(cacheDir, "hashcat-input").apply {
@@ -938,27 +1207,137 @@ class MainActivity : Activity()
                 }
                 val recoveredFile = createRecoveredOutputFile(hashFile, hashUri)
 
-                hashcatRunner.start(
-                    hashFile = hashFile,
-                    candidateSource = source,
-                    hashMode = hashMode,
-                    recoveredFile = recoveredFile,
-                    listener = createHashcatListener(recoveredFile)
+                if (hashcatInputPreparationStopRequested)
+                {
+                    completeHashcatPreparationStop()
+                    return@thread
+                }
+
+                startForegroundService(
+                    Intent(this, HashcatForegroundService::class.java)
+                        .setAction(HashcatForegroundService.ACTION_ENTER_FOREGROUND)
                 )
+
+                val accepted = service.startHashcat(
+                    HashcatForegroundService.StartRequest(
+                        hashFile = hashFile,
+                        candidateSource = source,
+                        hashMode = hashMode,
+                        recoveredFile = recoveredFile
+                    )
+                )
+
+                if (!accepted)
+                {
+                    error("Hashcat foreground service already owns an active job.")
+                }
+
+                if (hashcatInputPreparationStopRequested)
+                {
+                    hashcatInputPreparationActive = false
+                    service.stopHashcat("stop requested during service handoff")
+                    return@thread
+                }
+
+                runOnUiThread {
+                    hashcatInputPreparationActive = false
+                    hashcatServiceState = HashcatForegroundService.State.STARTING
+                    hashcatStatus = hashcatStatus.copy(
+                        state = getString(R.string.hashcat_status_starting)
+                    )
+                    renderHashcatStatus()
+                    renderHashcatExecutionControls()
+                    appendHashcatLog(getString(R.string.hashcat_starting_backend))
+                }
             }
             catch (error: Throwable)
             {
-                runOnUiThread {
-                    setHashcatBusy(false)
-                    hashcatStatus = hashcatStatus.copy(
-                        state = getString(R.string.hashcat_status_error)
-                    )
-                    renderHashcatStatus()
-                    appendHashcatLog(
-                        "ERROR: ${error.message ?: error.javaClass.simpleName}"
-                    )
+                if (hashcatInputPreparationStopRequested)
+                {
+                    completeHashcatPreparationStop()
+                }
+                else
+                {
+                    runOnUiThread {
+                        hashcatInputPreparationActive = false
+                        hashcatStatus = hashcatStatus.copy(
+                            state = getString(R.string.hashcat_status_error)
+                        )
+                        renderHashcatStatus()
+                        stopHashcatStatusTicker()
+                        renderHashcatExecutionControls()
+                        appendHashcatLog(
+                            "ERROR: ${error.message ?: error.javaClass.simpleName}"
+                        )
+                    }
                 }
             }
+            finally
+            {
+                hashcatInputPreparationThread = null
+            }
+        }
+    }
+
+    private fun requestHashcatStopDuringPreparation()
+    {
+        if (!hashcatInputPreparationActive || hashcatInputPreparationStopRequested)
+        {
+            return
+        }
+
+        hashcatInputPreparationStopRequested = true
+        hashcatInputPreparationThread?.interrupt()
+        hashcatStatus = hashcatStatus.copy(
+            state = getString(R.string.hashcat_status_stopping)
+        )
+        renderHashcatStatus()
+        renderHashcatExecutionControls()
+        appendHashcatLog(getString(R.string.hashcat_stopping))
+    }
+
+    private fun requestHashcatStop()
+    {
+        if (hashcatServiceState != HashcatForegroundService.State.STARTING &&
+            hashcatServiceState != HashcatForegroundService.State.RUNNING)
+        {
+            return
+        }
+
+        hashcatStatus = hashcatStatus.copy(
+            state = getString(R.string.hashcat_status_stopping)
+        )
+        renderHashcatStatus()
+        appendHashcatLog(getString(R.string.hashcat_stopping))
+        hashcatService?.stopHashcat("start/stop button")
+        renderHashcatExecutionControls()
+    }
+
+    private fun completeHashcatPreparationStop()
+    {
+        runOnUiThread {
+            hashcatInputPreparationActive = false
+            hashcatInputPreparationStopRequested = false
+            hashcatStatus = hashcatStatus.copy(
+                state = getString(R.string.hashcat_status_stopped)
+            )
+            renderHashcatStatus()
+            stopHashcatStatusTicker()
+            renderHashcatExecutionControls()
+            appendHashcatLog(getString(R.string.hashcat_stopped))
+        }
+    }
+
+    private fun requestHashcatNotificationPermissionIfNeeded()
+    {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED)
+        {
+            requestPermissions(
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                REQUEST_HASHCAT_NOTIFICATIONS
+            )
         }
     }
 
@@ -1011,67 +1390,6 @@ class MainActivity : Activity()
                 result.lines.forEach { line ->
                     writer.write(line)
                     writer.newLine()
-                }
-            }
-        }
-    }
-
-    private fun createHashcatListener(recoveredFile: File): HashcatRunner.Listener
-    {
-        return object : HashcatRunner.Listener
-        {
-            override fun onStarted(command: List<String>)
-            {
-                runOnUiThread {
-                    hashcatStatus = hashcatStatus.copy(
-                        state = getString(R.string.hashcat_status_running)
-                    )
-                    renderHashcatStatus()
-                    appendHashcatLog(
-                        "$ " + command.joinToString(" ")
-                    )
-                }
-            }
-
-            override fun onOutput(line: String)
-            {
-                appendHashcatLog(line)
-            }
-
-            override fun onFinished(exitCode: Int)
-            {
-                runOnUiThread {
-                    setHashcatBusy(false)
-                    hashcatStatus = hashcatStatus.copy(
-                        state = getString(R.string.hashcat_status_finished)
-                    )
-                    renderHashcatStatus()
-                    appendHashcatLog(
-                        getString(R.string.hashcat_finished, exitCode)
-                    )
-                    if (exitCode == 0 && recoveredFile.isFile && recoveredFile.length() > 0L)
-                    {
-                        appendHashcatLog(
-                            getString(
-                                R.string.hashcat_result_saved,
-                                recoveredFile.absolutePath
-                            )
-                        )
-                    }
-                }
-            }
-
-            override fun onError(error: Throwable)
-            {
-                runOnUiThread {
-                    setHashcatBusy(false)
-                    hashcatStatus = hashcatStatus.copy(
-                        state = getString(R.string.hashcat_status_error)
-                    )
-                    renderHashcatStatus()
-                    appendHashcatLog(
-                        "ERROR: ${error.message ?: error.javaClass.simpleName}"
-                    )
                 }
             }
         }
@@ -1147,6 +1465,17 @@ class MainActivity : Activity()
             hashcatStatus.speed ?: fallback,
             hashcatStatus.recovered ?: fallback
         )
+    }
+
+    private fun startHashcatStatusTicker()
+    {
+        hashcatLogHandler.removeCallbacks(hashcatStatusTickRunnable)
+        hashcatLogHandler.post(hashcatStatusTickRunnable)
+    }
+
+    private fun stopHashcatStatusTicker()
+    {
+        hashcatLogHandler.removeCallbacks(hashcatStatusTickRunnable)
     }
 
     private fun formatDuration(milliseconds: Long): String
@@ -1396,8 +1725,34 @@ class MainActivity : Activity()
         binding.convertButton.isEnabled = !busy && selectedCaptureUri != null
     }
 
-    private fun setHashcatBusy(busy: Boolean)
+    private fun isHashcatBusy(): Boolean
     {
+        return hashcatInputPreparationActive ||
+            hashcatServiceState != HashcatForegroundService.State.IDLE
+    }
+
+    private fun renderHashcatExecutionControls()
+    {
+        val busy = isHashcatBusy()
+        val stopAvailable = when
+        {
+            hashcatInputPreparationActive -> !hashcatInputPreparationStopRequested
+            hashcatServiceState == HashcatForegroundService.State.STARTING -> true
+            hashcatServiceState == HashcatForegroundService.State.RUNNING -> true
+            else -> false
+        }
+        val hasHashInput =
+            selectedHashUri != null ||
+            selectedHashClipboardFile?.isFile == true
+        val hasCandidates = if (candidateSource == CANDIDATE_SOURCE_TEMPLATE)
+        {
+            maskTemplate.isNotBlank()
+        }
+        else
+        {
+            selectedWordlistUri != null
+        }
+
         binding.hashcatProgressBar.visibility = if (busy)
         {
             View.VISIBLE
@@ -1412,9 +1767,13 @@ class MainActivity : Activity()
         binding.pasteHashButton.isEnabled = !busy
         binding.candidateTemplateRadioButton.isEnabled = !busy
         binding.candidateWordlistRadioButton.isEnabled = !busy
-        binding.maskTemplateEditText.isEnabled = !busy && candidateSource == CANDIDATE_SOURCE_TEMPLATE
-        binding.maskAssistantButton.isEnabled = !busy && candidateSource == CANDIDATE_SOURCE_TEMPLATE
-        binding.selectWordlistButton.isEnabled = !busy && candidateSource == CANDIDATE_SOURCE_WORDLIST
+        binding.maskTemplateEditText.isEnabled =
+            !busy && candidateSource == CANDIDATE_SOURCE_TEMPLATE
+        binding.maskAssistantButton.isEnabled =
+            !busy && candidateSource == CANDIDATE_SOURCE_TEMPLATE
+        binding.selectWordlistButton.isEnabled =
+            !busy && candidateSource == CANDIDATE_SOURCE_WORDLIST
+
         binding.startHashcatButton.text = if (busy)
         {
             getString(R.string.stop_hashcat)
@@ -1423,46 +1782,22 @@ class MainActivity : Activity()
         {
             getString(R.string.start_hashcat)
         }
-        binding.startHashcatButton.isEnabled = busy
-
-        if (!busy)
+        binding.startHashcatButton.isEnabled = if (busy)
         {
-            updateHashcatStartState()
-        }
-    }
-
-    private fun updateHashcatStartState()
-    {
-        val hasHashInput =
-            selectedHashUri != null ||
-            selectedHashClipboardFile?.isFile == true
-        val hasCandidates = if (candidateSource == CANDIDATE_SOURCE_TEMPLATE)
-        {
-            maskTemplate.isNotBlank()
-        }
-        else
-        {
-            selectedWordlistUri != null
-        }
-
-        binding.startHashcatButton.text = if (hashcatRunner.isRunning())
-        {
-            getString(R.string.stop_hashcat)
-        }
-        else
-        {
-            getString(R.string.start_hashcat)
-        }
-        binding.startHashcatButton.isEnabled = if (hashcatRunner.isRunning())
-        {
-            true
+            stopAvailable
         }
         else
         {
             hasHashInput &&
                 hasCandidates &&
-                hashcatReady
+                hashcatReady &&
+                hashcatServiceBound
         }
+    }
+
+    private fun updateHashcatStartState()
+    {
+        renderHashcatExecutionControls()
     }
 
     private fun createRecoveredOutputFile(
@@ -1821,10 +2156,15 @@ class MainActivity : Activity()
         const val REQUEST_CREATE_OUTPUT = 1002
         const val REQUEST_OPEN_HASH_FILE = 1003
         const val REQUEST_OPEN_WORDLIST = 1004
+        const val REQUEST_HASHCAT_NOTIFICATIONS = 1005
 
         const val PREFERENCES_NAME = "hashcat_ui"
         const val PREFERENCE_THEME = "theme"
         const val PREFERENCE_LANGUAGE = "language"
+        const val PREFERENCE_HASH_MODE = "hash_mode"
+        const val PREFERENCE_CANDIDATE_SOURCE = "candidate_source"
+        const val PREFERENCE_MASK_TEMPLATE = "mask_template"
+        const val PREFERENCE_WORDLIST_URI = "wordlist_uri"
         const val THEME_LIGHT = "light"
         const val THEME_DARK = "dark"
         const val LANGUAGE_RUSSIAN = "ru"
@@ -1855,6 +2195,7 @@ class MainActivity : Activity()
         const val MAX_HASHCAT_LOG_LINES = 300
         const val MAX_HASHCAT_LOG_CHARS = 128 * 1024
         const val HASHCAT_LOG_FLUSH_DELAY_MS = 250L
+        const val HASHCAT_STATUS_TICK_MS = 1000L
         const val HASHCAT_LOG_BOTTOM_SLOP_DP = 32
     }
 }
