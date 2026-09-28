@@ -59,6 +59,14 @@ class HashcatRunner(
         val category: String
     )
 
+    enum class MemoryProfile
+    {
+        AUTO,
+        LOW,
+        BALANCED,
+        HIGH
+    }
+
     sealed class CandidateSource
     {
         data class Wordlist(
@@ -142,6 +150,7 @@ class HashcatRunner(
         candidateSource: CandidateSource,
         hashMode: Int,
         recoveredFile: File,
+        memoryProfile: MemoryProfile,
         listener: Listener
     )
     {
@@ -176,6 +185,7 @@ class HashcatRunner(
             hashFile = hashFile,
             candidateSource = candidateSource,
             hashMode = hashMode,
+            memoryProfile = memoryProfile,
             potfile = potfile,
             recovered = recoveredFile
         )
@@ -325,11 +335,39 @@ class HashcatRunner(
         hashFile: File,
         candidateSource: CandidateSource,
         hashMode: Int,
+        memoryProfile: MemoryProfile,
         potfile: File,
         recovered: File
     ): List<String>
     {
         val command = ArrayList<String>()
+
+        when (memoryProfile)
+        {
+            MemoryProfile.AUTO ->
+            {
+            }
+
+            MemoryProfile.LOW ->
+            {
+                command += "-w"
+                command += "1"
+            }
+
+            MemoryProfile.BALANCED ->
+            {
+                command += "-O"
+                command += "-w"
+                command += "1"
+            }
+
+            MemoryProfile.HIGH ->
+            {
+                command += "-O"
+                command += "-w"
+                command += "3"
+            }
+        }
 
         command += executable.absolutePath
         command += "-m"

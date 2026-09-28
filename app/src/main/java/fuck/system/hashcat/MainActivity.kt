@@ -60,6 +60,7 @@ class MainActivity : Activity()
     private var selectedScreenId: Int = R.id.nav_hashcat
     private var hashModes: List<HashcatRunner.HashMode> = emptyList()
     private var selectedHashMode: Int = DEFAULT_HASH_MODE
+    private var selectedMemoryProfile: HashcatRunner.MemoryProfile = HashcatRunner.MemoryProfile.AUTO
     private var hashcatReady: Boolean = false
     private var hashcatStatus: HashcatStatus = HashcatStatus()
     private var hashcatStartedAtRealtime: Long = 0L
@@ -360,6 +361,17 @@ class MainActivity : Activity()
             showHashModeDialog()
         }
 
+        binding.memoryProfileRadioGroup.setOnCheckedChangeListener { _, checkedId ->
+            selectedMemoryProfile = when (checkedId)
+            {
+                R.id.memoryProfileLowRadioButton -> HashcatRunner.MemoryProfile.LOW
+                R.id.memoryProfileBalancedRadioButton -> HashcatRunner.MemoryProfile.BALANCED
+                R.id.memoryProfileHighRadioButton -> HashcatRunner.MemoryProfile.HIGH
+                else -> HashcatRunner.MemoryProfile.AUTO
+            }
+            saveHashcatPreferences()
+        }
+
         binding.candidateSourceRadioGroup.setOnCheckedChangeListener { _, checkedId ->
             candidateSource = if (checkedId == R.id.candidateWordlistRadioButton)
             {
@@ -555,6 +567,7 @@ class MainActivity : Activity()
             .putInt(PREFERENCE_HASH_MODE, selectedHashMode)
             .putString(PREFERENCE_CANDIDATE_SOURCE, candidateSource)
             .putString(PREFERENCE_MASK_TEMPLATE, maskTemplate)
+            .putString(PREFERENCE_MEMORY_PROFILE, selectedMemoryProfile.name)
             .putString(PREFERENCE_WORDLIST_URI, selectedWordlistUri?.toString())
             .apply()
     }
@@ -562,6 +575,9 @@ class MainActivity : Activity()
     private fun restoreHashcatPreferences() {
         val preferences = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
         selectedHashMode = preferences.getInt(PREFERENCE_HASH_MODE, DEFAULT_HASH_MODE)
+        selectedMemoryProfile = preferences.getString(PREFERENCE_MEMORY_PROFILE, HashcatRunner.MemoryProfile.AUTO.name)
+            ?.let { runCatching { HashcatRunner.MemoryProfile.valueOf(it) }.getOrDefault(HashcatRunner.MemoryProfile.AUTO) }
+            ?: HashcatRunner.MemoryProfile.AUTO
         candidateSource = preferences.getString(PREFERENCE_CANDIDATE_SOURCE, CANDIDATE_SOURCE_TEMPLATE) ?: CANDIDATE_SOURCE_TEMPLATE
         maskTemplate = preferences.getString(PREFERENCE_MASK_TEMPLATE, DEFAULT_MASK_TEMPLATE) ?: DEFAULT_MASK_TEMPLATE
         selectedWordlistUri = preferences.getString(PREFERENCE_WORDLIST_URI, null)?.let(Uri::parse)
@@ -1235,7 +1251,8 @@ class MainActivity : Activity()
                         hashFile = hashFile,
                         candidateSource = source,
                         hashMode = hashMode,
-                        recoveredFile = recoveredFile
+                        recoveredFile = recoveredFile,
+                        memoryProfile = selectedMemoryProfile
                     )
                 )
 
@@ -2204,6 +2221,7 @@ class MainActivity : Activity()
         const val PREFERENCE_HASH_MODE = "hash_mode"
         const val PREFERENCE_CANDIDATE_SOURCE = "candidate_source"
         const val PREFERENCE_MASK_TEMPLATE = "mask_template"
+        const val PREFERENCE_MEMORY_PROFILE = "memory_profile"
         const val PREFERENCE_WORDLIST_URI = "wordlist_uri"
         const val THEME_LIGHT = "light"
         const val THEME_DARK = "dark"

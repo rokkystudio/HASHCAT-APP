@@ -35,6 +35,7 @@ class HashcatForegroundService : Service()
         val hashFile: File,
         val candidateSource: HashcatRunner.CandidateSource,
         val hashMode: Int,
+        val memoryProfile: HashcatRunner.MemoryProfile = HashcatRunner.MemoryProfile.AUTO,
         val recoveredFile: File
     )
 
@@ -144,6 +145,7 @@ class HashcatForegroundService : Service()
                     candidateSource = request.candidateSource,
                     hashMode = request.hashMode,
                     recoveredFile = request.recoveredFile,
+                    memoryProfile = request.memoryProfile,
                     listener = createRunnerListener(request)
                 )
             }
