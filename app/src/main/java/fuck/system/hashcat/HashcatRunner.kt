@@ -59,14 +59,6 @@ class HashcatRunner(
         val category: String
     )
 
-    enum class MemoryProfile
-    {
-        AUTO,
-        LOW,
-        BALANCED,
-        HIGH
-    }
-
     sealed class CandidateSource
     {
         data class Wordlist(
@@ -81,14 +73,23 @@ class HashcatRunner(
         ) : CandidateSource()
     }
 
+    /**
+     * Defines the Android memory budget for a Hashcat run. AUTO leaves memory
+     * sizing to Hashcat; explicit profiles cap unified device and host memory.
+     */
+    enum class MemoryProfile(val memoryLimitMb: Int?)
+    {
+        AUTO(null),
+        LOW(768),
+        BALANCED(1536),
+        HIGH(3072)
+    }
+
     @Volatile
     private var process: Process? = null
 
     @Volatile
     private var stopRequested: Boolean = false
-
-    @Volatile
-    private var stoppingProcess: Process? = null
 
     /**
      * Returns true while the native Hashcat process is alive.
@@ -108,8 +109,8 @@ class HashcatRunner(
     }
 
     /**
-     * Reads the hash-mode catalog generated from the same pinned upstream
-     * Hashcat build as the published Android binaries.
+     * Reads the hash-mode catalog generated from the same Hashcat release as the
+     * published Android binaries.
      */
     fun loadHashModes(): List<HashMode>
     {
@@ -162,11 +163,6 @@ class HashcatRunner(
         stopRequested = false
 
         val executable = prepareRuntime()
-
-        if (stopRequested)
-        {
-            throw InterruptedIOException("Hashcat start was cancelled before process launch.")
-        }
         val runtimeDirectory = resolveRuntimeDirectory()
         val nativeDirectory = resolveNativeLibraryDirectory()
 
@@ -185,12 +181,13 @@ class HashcatRunner(
             hashFile = hashFile,
             candidateSource = candidateSource,
             hashMode = hashMode,
-            memoryProfile = memoryProfile,
             potfile = potfile,
-            recovered = recoveredFile
+            recovered = recoveredFile,
+            memoryProfile = memoryProfile
         )
 
-        val processBuilder = ProcessBuilder(command)
+        val processCommand = buildPrioritizedCommand(command)
+        val processBuilder = ProcessBuilder(processCommand)
             .directory(runtimeDirectory)
             .redirectErrorStream(true)
 
@@ -201,6 +198,9 @@ class HashcatRunner(
             put("XDG_CACHE_HOME", cacheDirectory.absolutePath)
             put("HASHCAT_SHARED_FOLDER", runtimeDirectory.absolutePath)
             put("HASHCAT_MEMORY", "1")
+            memoryProfile.memoryLimitMb?.let { limitMb ->
+                put("HASHCAT_MEMORY_LIMIT_MB", limitMb.toString())
+            }
             putNativeLibraryPath(
                 runtimeDirectory,
                 nativeDirectory,
@@ -208,7 +208,12 @@ class HashcatRunner(
             )
         }
 
-        Log.i(LOG_TAG, "Starting: ${command.joinToString(" ")}")
+        if (stopRequested)
+        {
+            throw InterruptedIOException("Hashcat start was cancelled before native process launch.")
+        }
+
+        Log.i(LOG_TAG, "Starting: ${processCommand.joinToString(" ")}")
         Log.d(
             LOG_TAG,
             "Runtime=${runtimeDirectory.absolutePath}, " +
@@ -227,17 +232,22 @@ class HashcatRunner(
         }
 
         process = startedProcess
-        listener.onStarted(command)
-
         if (stopRequested)
         {
-            stop("stop requested while native process was launching")
+            startedProcess.destroy()
         }
+        listener.onStarted(processCommand)
 
         thread(name = "hashcat-output") {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+
             try
             {
-                readProcessOutput(startedProcess, listener)
+                startedProcess.inputStream.bufferedReader().useLines { lines ->
+                    lines.forEach { line ->
+                        listener.onOutput(line)
+                    }
+                }
 
                 val exitCode = startedProcess.waitFor()
                 Log.i(LOG_TAG, "Finished with exit code $exitCode")
@@ -248,6 +258,9 @@ class HashcatRunner(
                 if (error is InterruptedIOException && stopRequested)
                 {
                     Log.i(LOG_TAG, "Hashcat output stream interrupted by requested stop.")
+                    val exitCode = waitForStoppedProcess(startedProcess)
+                    Log.i(LOG_TAG, "Finished with exit code $exitCode after requested stop")
+                    listener.onFinished(exitCode)
                 }
                 else
                 {
@@ -268,106 +281,30 @@ class HashcatRunner(
         }
     }
 
-    /**
-     * Reads Hashcat output as raw characters and emits records separated by LF or CR.
-     * Hashcat writes several startup and status messages without regular line feeds,
-     * so relying on readLine() can merge unrelated messages and delay partial output.
-     */
-    private fun readProcessOutput(startedProcess: Process, listener: Listener)
+    private fun buildPrioritizedCommand(command: List<String>): List<String>
     {
-        val reader = startedProcess.inputStream.reader()
-        val buffer = CharArray(OUTPUT_BUFFER_CHARS)
-        val pending = StringBuilder()
-        var previousWasCarriageReturn = false
+        val nice = File("/system/bin/nice")
 
-        while (true)
+        return if (nice.canExecute())
         {
-            val count = reader.read(buffer)
-            if (count < 0)
-            {
-                break
-            }
-
-            for (index in 0 until count)
-            {
-                when (val character = buffer[index])
-                {
-                    '\r', '\n' ->
-                    {
-                        if (character == '\n' && previousWasCarriageReturn)
-                        {
-                            previousWasCarriageReturn = false
-                            continue
-                        }
-
-                        emitProcessOutputRecord(pending, listener)
-                        previousWasCarriageReturn = character == '\r'
-                    }
-
-                    else ->
-                    {
-                        previousWasCarriageReturn = false
-                        pending.append(character)
-
-                        if (pending.length >= MAX_OUTPUT_RECORD_CHARS)
-                        {
-                            emitProcessOutputRecord(pending, listener)
-                        }
-                    }
-                }
-            }
+            listOf(nice.absolutePath, "-n", HASHCAT_NICE_INCREMENT.toString()) + command
         }
-
-        if (pending.isNotEmpty())
+        else
         {
-            emitProcessOutputRecord(pending, listener)
+            command
         }
-    }
-
-    private fun emitProcessOutputRecord(pending: StringBuilder, listener: Listener)
-    {
-        listener.onOutput(pending.toString())
-        pending.setLength(0)
     }
 
     private fun buildCommand(
-        executable: File,
-        hashFile: File,
+        executable: File,        hashFile: File,
         candidateSource: CandidateSource,
         hashMode: Int,
-        memoryProfile: MemoryProfile,
         potfile: File,
-        recovered: File
+        recovered: File,
+        memoryProfile: MemoryProfile
     ): List<String>
     {
         val command = ArrayList<String>()
-
-        when (memoryProfile)
-        {
-            MemoryProfile.AUTO ->
-            {
-            }
-
-            MemoryProfile.LOW ->
-            {
-                command += "-w"
-                command += "1"
-            }
-
-            MemoryProfile.BALANCED ->
-            {
-                command += "-O"
-                command += "-w"
-                command += "1"
-            }
-
-            MemoryProfile.HIGH ->
-            {
-                command += "-O"
-                command += "-w"
-                command += "3"
-            }
-        }
 
         command += executable.absolutePath
         command += "-m"
@@ -380,12 +317,35 @@ class HashcatRunner(
         }
         command += "--status"
         command += "--status-timer=1"
+        command += "--self-test-disable"
         command += "--session"
         command += "hashcat-app"
         command += "--potfile-path"
         command += potfile.absolutePath
         command += "--outfile"
         command += recovered.absolutePath
+
+        when (memoryProfile)
+        {
+            MemoryProfile.AUTO -> Unit
+            MemoryProfile.LOW ->
+            {
+                command += "-w"
+                command += "1"
+            }
+            MemoryProfile.BALANCED ->
+            {
+                command += "-O"
+                command += "-w"
+                command += "1"
+            }
+            MemoryProfile.HIGH ->
+            {
+                command += "-O"
+                command += "-w"
+                command += "3"
+            }
+        }
 
         when (candidateSource)
         {
@@ -417,64 +377,40 @@ class HashcatRunner(
     }
 
     /**
+     * Returns the stopped process exit code after a bounded wait.
+     */
+    private fun waitForStoppedProcess(stoppedProcess: Process): Int
+    {
+        if (!stoppedProcess.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        {
+            stoppedProcess.destroyForcibly()
+            stoppedProcess.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        }
+
+        return try
+        {
+            stoppedProcess.exitValue()
+        }
+        catch (_: IllegalThreadStateException)
+        {
+            STOPPED_EXIT_CODE
+        }
+    }
+
+    /**
      * Requests termination of the current native process and kills it if it does
      * not exit quickly after the graceful signal.
      */
     fun stop(reason: String = "unspecified")
     {
+        Log.w(LOG_TAG, "Stop requested: $reason")
         stopRequested = true
 
-        val activeProcess = process
-
-        if (activeProcess == null)
-        {
-            Log.i(LOG_TAG, "Stop requested before native process launch: $reason")
-            return
-        }
-
-        synchronized(this)
-        {
-            if (stoppingProcess === activeProcess)
-            {
-                Log.i(LOG_TAG, "Stop already in progress: $reason")
-                return
-            }
-
-            stoppingProcess = activeProcess
-        }
-
-        Log.w(LOG_TAG, "Stop requested: $reason")
+        val activeProcess = process ?: return
 
         thread(name = "hashcat-stop") {
-            try
-            {
-                activeProcess.destroy()
-
-                if (!activeProcess.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS))
-                {
-                    Log.w(LOG_TAG, "Graceful stop timed out; killing Hashcat.")
-                    activeProcess.destroyForcibly()
-
-                    if (!activeProcess.waitFor(FORCE_STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS))
-                    {
-                        Log.e(LOG_TAG, "Hashcat is still alive after destroyForcibly().")
-                    }
-                }
-
-                runCatching { activeProcess.inputStream.close() }
-                runCatching { activeProcess.outputStream.close() }
-                runCatching { activeProcess.errorStream.close() }
-            }
-            finally
-            {
-                synchronized(this)
-                {
-                    if (stoppingProcess === activeProcess)
-                    {
-                        stoppingProcess = null
-                    }
-                }
-            }
+            activeProcess.destroy()
+            waitForStoppedProcess(activeProcess)
         }
     }
 
@@ -684,9 +620,8 @@ class HashcatRunner(
         const val HASHCAT_ASSET_ROOT = "hashcat"
         const val ASSET_MARKER_FILE = ".hashcat-app-assets-version"
         const val STOP_TIMEOUT_SECONDS = 2L
-        const val FORCE_STOP_TIMEOUT_SECONDS = 2L
-        const val OUTPUT_BUFFER_CHARS = 4096
-        const val MAX_OUTPUT_RECORD_CHARS = 3500
+        const val STOPPED_EXIT_CODE = 143
+        const val HASHCAT_NICE_INCREMENT = 10
         const val HASH_MODE_CATALOG = "hashcat-modes.json"
     }
 }

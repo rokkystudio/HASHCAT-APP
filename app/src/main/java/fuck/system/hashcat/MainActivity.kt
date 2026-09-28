@@ -3,24 +3,22 @@ package fuck.system.hashcat
 import android.Manifest
 import android.app.Activity
 import android.content.ClipboardManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.os.IBinder
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import fuck.system.hashcat.databinding.ActivityMainBinding
 import java.io.File
 import java.io.OutputStreamWriter
@@ -45,12 +43,16 @@ class MainActivity : Activity()
         val recovered: String? = null
     )
 
+    private enum class HashcatRunState
+    {
+        IDLE,
+        STARTING,
+        RUNNING,
+        STOPPING
+    }
+
     private lateinit var binding: ActivityMainBinding
     private lateinit var hashcatRunner: HashcatRunner
-    private var hashcatService: HashcatForegroundService? = null
-    private var hashcatServiceBound: Boolean = false
-    private var hashcatServiceState: HashcatForegroundService.State =
-        HashcatForegroundService.State.IDLE
 
     private var selectedCaptureUri: Uri? = null
     private var selectedHashUri: Uri? = null
@@ -60,8 +62,9 @@ class MainActivity : Activity()
     private var selectedScreenId: Int = R.id.nav_hashcat
     private var hashModes: List<HashcatRunner.HashMode> = emptyList()
     private var selectedHashMode: Int = DEFAULT_HASH_MODE
-    private var selectedMemoryProfile: HashcatRunner.MemoryProfile = HashcatRunner.MemoryProfile.AUTO
     private var hashcatReady: Boolean = false
+    @Volatile
+    private var hashcatRunState: HashcatRunState = HashcatRunState.IDLE
     private var hashcatStatus: HashcatStatus = HashcatStatus()
     private var hashcatStartedAtRealtime: Long = 0L
     private var candidateSource: String = CANDIDATE_SOURCE_TEMPLATE
@@ -69,16 +72,9 @@ class MainActivity : Activity()
     private var maskCharset: String = DEFAULT_MASK_CHARSET
     private var maskMinLength: Int = DEFAULT_MASK_MIN_LENGTH
     private var maskMaxLength: Int = DEFAULT_MASK_MAX_LENGTH
+    private var selectedMemoryProfile: HashcatRunner.MemoryProfile = HashcatRunner.MemoryProfile.AUTO
+    private var hashcatMemoryInfo: String? = null
     private var suppressMaskTextChange: Boolean = false
-
-    @Volatile
-    private var hashcatInputPreparationActive: Boolean = false
-
-    @Volatile
-    private var hashcatInputPreparationStopRequested: Boolean = false
-
-    @Volatile
-    private var hashcatInputPreparationThread: Thread? = null
 
     private val hashcatLogLock = Any()
     private val hashcatLogHistory = ArrayDeque<String>()
@@ -87,189 +83,7 @@ class MainActivity : Activity()
     private val hashcatLogHandler = Handler(Looper.getMainLooper())
     private var hashcatLogHistoryCharCount = 0
     private var hashcatLogFlushScheduled = false
-    private var hashcatLogFollowTail = true
     private val hashcatLogFlushRunnable = Runnable { flushHashcatLog() }
-    private val hashcatStatusTickRunnable = object : Runnable
-    {
-        override fun run()
-        {
-            if (!isHashcatBusy())
-            {
-                return
-            }
-
-            renderHashcatStatus()
-            hashcatLogHandler.postDelayed(this, HASHCAT_STATUS_TICK_MS)
-        }
-    }
-
-    private val hashcatServiceListener = object : HashcatForegroundService.Listener
-    {
-        override fun onStateChanged(state: HashcatForegroundService.State)
-        {
-            runOnUiThread {
-                if (isDestroyed)
-                {
-                    return@runOnUiThread
-                }
-
-                hashcatServiceState = state
-
-                when (state)
-                {
-                    HashcatForegroundService.State.STARTING ->
-                    {
-                        if (!hashcatInputPreparationActive)
-                        {
-                            hashcatStatus = hashcatStatus.copy(
-                                state = getString(R.string.hashcat_status_starting)
-                            )
-                            renderHashcatStatus()
-                        }
-                    }
-
-                    HashcatForegroundService.State.RUNNING ->
-                    {
-                        hashcatStatus = hashcatStatus.copy(
-                            state = getString(R.string.hashcat_status_running)
-                        )
-                        renderHashcatStatus()
-                    }
-
-                    HashcatForegroundService.State.STOPPING ->
-                    {
-                        hashcatStatus = hashcatStatus.copy(
-                            state = getString(R.string.hashcat_status_stopping)
-                        )
-                        renderHashcatStatus()
-                    }
-
-                    HashcatForegroundService.State.IDLE -> Unit
-                }
-
-                renderHashcatExecutionControls()
-
-                if (state != HashcatForegroundService.State.IDLE)
-                {
-                    startHashcatStatusTicker()
-                }
-            }
-        }
-
-        override fun onStarted(command: List<String>)
-        {
-            runOnUiThread {
-                if (isDestroyed)
-                {
-                    return@runOnUiThread
-                }
-
-                appendHashcatLog(
-                    "$ " + command.joinToString(" ")
-                )
-            }
-        }
-
-        override fun onOutput(line: String)
-        {
-            appendHashcatLog(line)
-        }
-
-        override fun onFinished(exitCode: Int, recoveredFile: File)
-        {
-            runOnUiThread {
-                if (isDestroyed)
-                {
-                    return@runOnUiThread
-                }
-
-                hashcatServiceState = HashcatForegroundService.State.IDLE
-                hashcatStatus = hashcatStatus.copy(
-                    state = getString(R.string.hashcat_status_finished)
-                )
-                renderHashcatStatus()
-                stopHashcatStatusTicker()
-                renderHashcatExecutionControls()
-                appendHashcatLog(
-                    getString(R.string.hashcat_finished, exitCode)
-                )
-
-                if (exitCode == 0 && recoveredFile.isFile && recoveredFile.length() > 0L)
-                {
-                    appendHashcatLog(
-                        getString(
-                            R.string.hashcat_result_saved,
-                            recoveredFile.absolutePath
-                        )
-                    )
-                }
-            }
-        }
-
-        override fun onStopped(exitCode: Int?)
-        {
-            runOnUiThread {
-                if (isDestroyed)
-                {
-                    return@runOnUiThread
-                }
-
-                hashcatServiceState = HashcatForegroundService.State.IDLE
-                hashcatStatus = hashcatStatus.copy(
-                    state = getString(R.string.hashcat_status_stopped)
-                )
-                renderHashcatStatus()
-                stopHashcatStatusTicker()
-                renderHashcatExecutionControls()
-                appendHashcatLog(getString(R.string.hashcat_stopped))
-            }
-        }
-
-        override fun onError(error: Throwable)
-        {
-            runOnUiThread {
-                if (isDestroyed)
-                {
-                    return@runOnUiThread
-                }
-
-                hashcatServiceState = HashcatForegroundService.State.IDLE
-                hashcatStatus = hashcatStatus.copy(
-                    state = getString(R.string.hashcat_status_error)
-                )
-                renderHashcatStatus()
-                stopHashcatStatusTicker()
-                renderHashcatExecutionControls()
-                appendHashcatLog(
-                    "ERROR: ${error.message ?: error.javaClass.simpleName}"
-                )
-            }
-        }
-    }
-
-    private val hashcatServiceConnection = object : ServiceConnection
-    {
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?)
-        {
-            val service = (binder as? HashcatForegroundService.LocalBinder)
-                ?.service()
-                ?: return
-
-            hashcatService = service
-            hashcatServiceBound = true
-            hashcatServiceState = service.currentState()
-            service.setListener(hashcatServiceListener)
-            renderHashcatExecutionControls()
-        }
-
-        override fun onServiceDisconnected(name: ComponentName?)
-        {
-            hashcatService = null
-            hashcatServiceBound = false
-            hashcatServiceState = HashcatForegroundService.State.IDLE
-            renderHashcatExecutionControls()
-        }
-    }
 
     /**
      * Applies the saved light or dark theme and application language before
@@ -313,16 +127,10 @@ class MainActivity : Activity()
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        binding.hashcatLogScrollView.setOnScrollChangeListener { view, _, scrollY, _, _ ->
-            val child = binding.hashcatLogScrollView.getChildAt(0)
-            val maxScroll = ((child?.height ?: 0) - view.height).coerceAtLeast(0)
-            val bottomSlop = (HASHCAT_LOG_BOTTOM_SLOP_DP * resources.displayMetrics.density).toInt()
-
-            hashcatLogFollowTail = maxScroll - scrollY <= bottomSlop
-        }
+        requestNotificationPermission()
 
         hashcatRunner = HashcatRunner(this)
+        selectedMemoryProfile = loadMemoryProfile()
         binding.hashModeButton.isEnabled = false
         renderHashcatStatus()
 
@@ -361,17 +169,6 @@ class MainActivity : Activity()
             showHashModeDialog()
         }
 
-        binding.memoryProfileRadioGroup.setOnCheckedChangeListener { _, checkedId ->
-            selectedMemoryProfile = when (checkedId)
-            {
-                R.id.memoryProfileLowRadioButton -> HashcatRunner.MemoryProfile.LOW
-                R.id.memoryProfileBalancedRadioButton -> HashcatRunner.MemoryProfile.BALANCED
-                R.id.memoryProfileHighRadioButton -> HashcatRunner.MemoryProfile.HIGH
-                else -> HashcatRunner.MemoryProfile.AUTO
-            }
-            saveHashcatPreferences()
-        }
-
         binding.candidateSourceRadioGroup.setOnCheckedChangeListener { _, checkedId ->
             candidateSource = if (checkedId == R.id.candidateWordlistRadioButton)
             {
@@ -381,10 +178,12 @@ class MainActivity : Activity()
             {
                 CANDIDATE_SOURCE_TEMPLATE
             }
+            saveCandidateSettings()
             renderCandidateSource()
             updateHashcatStartState()
-            saveHashcatPreferences()
         }
+
+        setupMemoryProfileSpinner()
 
         binding.maskTemplateEditText.addTextChangedListener(object : TextWatcher
         {
@@ -411,9 +210,9 @@ class MainActivity : Activity()
                 if (!suppressMaskTextChange)
                 {
                     maskTemplate = text?.toString().orEmpty()
+                    saveCandidateSettings()
                     renderCandidateInfo()
                     updateHashcatStartState()
-                    saveHashcatPreferences()
                 }
             }
         })
@@ -427,22 +226,12 @@ class MainActivity : Activity()
         }
 
         binding.startHashcatButton.setOnClickListener {
-            when
+            when (hashcatRunState)
             {
-                hashcatInputPreparationActive ->
-                {
-                    requestHashcatStopDuringPreparation()
-                }
-
-                hashcatServiceState == HashcatForegroundService.State.STARTING ||
-                    hashcatServiceState == HashcatForegroundService.State.RUNNING ->
-                {
-                    requestHashcatStop()
-                }
-
-                hashcatServiceState == HashcatForegroundService.State.STOPPING -> Unit
-
-                else -> startHashcat()
+                HashcatRunState.IDLE -> startHashcat()
+                HashcatRunState.STARTING,
+                HashcatRunState.RUNNING -> requestHashcatStop("start/stop button")
+                HashcatRunState.STOPPING -> Unit
             }
         }
 
@@ -454,9 +243,12 @@ class MainActivity : Activity()
             startConversion()
         }
 
+        restorePersistentHashcatState()
         restoreUiState(savedInstanceState)
         renderHeaderControls()
         renderCandidateSource()
+        renderMemoryProfile()
+        renderHashcatMemoryInfo()
         showScreen(selectedScreenId)
         binding.bottomNav.selectedItemId = selectedScreenId
         updateHashcatStartState()
@@ -485,37 +277,7 @@ class MainActivity : Activity()
         outState.putString(STATE_MASK_CHARSET, maskCharset)
         outState.putInt(STATE_MASK_MIN_LENGTH, maskMinLength)
         outState.putInt(STATE_MASK_MAX_LENGTH, maskMaxLength)
-    }
-
-    /**
-     * Binds the visible activity to the process-owning foreground service.
-     */
-    override fun onStart()
-    {
-        super.onStart()
-
-        bindService(
-            Intent(this, HashcatForegroundService::class.java),
-            hashcatServiceConnection,
-            Context.BIND_AUTO_CREATE
-        )
-    }
-
-    /**
-     * Detaches UI callbacks while keeping an active foreground Hashcat job
-     * running independently of the activity lifecycle.
-     */
-    override fun onStop()
-    {
-        if (hashcatServiceBound)
-        {
-            hashcatService?.clearListener(hashcatServiceListener)
-            unbindService(hashcatServiceConnection)
-            hashcatServiceBound = false
-            hashcatService = null
-        }
-
-        super.onStop()
+        outState.putString(STATE_MEMORY_PROFILE, selectedMemoryProfile.name)
     }
 
     /**
@@ -534,13 +296,16 @@ class MainActivity : Activity()
     }
 
     /**
-     * Releases activity-only callbacks. An active Hashcat job belongs to the
-     * foreground service and is intentionally not stopped here.
+     * Stops a native Hashcat process when this Activity is destroyed.
      */
     override fun onDestroy()
     {
         hashcatLogHandler.removeCallbacks(hashcatLogFlushRunnable)
-        hashcatLogHandler.removeCallbacks(hashcatStatusTickRunnable)
+        hashcatRunner.stop(
+            "MainActivity.onDestroy finishing=$isFinishing " +
+                "changingConfigurations=$isChangingConfigurations"
+        )
+        stopHashcatForegroundService()
         super.onDestroy()
     }
 
@@ -561,39 +326,26 @@ class MainActivity : Activity()
         }
     }
 
-    private fun saveHashcatPreferences() {
-        getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putInt(PREFERENCE_HASH_MODE, selectedHashMode)
-            .putString(PREFERENCE_CANDIDATE_SOURCE, candidateSource)
-            .putString(PREFERENCE_MASK_TEMPLATE, maskTemplate)
-            .putString(PREFERENCE_MEMORY_PROFILE, selectedMemoryProfile.name)
-            .putString(PREFERENCE_WORDLIST_URI, selectedWordlistUri?.toString())
-            .apply()
-    }
-
-    private fun restoreHashcatPreferences() {
-        val preferences = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-        selectedHashMode = preferences.getInt(PREFERENCE_HASH_MODE, DEFAULT_HASH_MODE)
-        selectedMemoryProfile = preferences.getString(PREFERENCE_MEMORY_PROFILE, HashcatRunner.MemoryProfile.AUTO.name)
-            ?.let { runCatching { HashcatRunner.MemoryProfile.valueOf(it) }.getOrDefault(HashcatRunner.MemoryProfile.AUTO) }
-            ?: HashcatRunner.MemoryProfile.AUTO
-        candidateSource = preferences.getString(PREFERENCE_CANDIDATE_SOURCE, CANDIDATE_SOURCE_TEMPLATE) ?: CANDIDATE_SOURCE_TEMPLATE
-        maskTemplate = preferences.getString(PREFERENCE_MASK_TEMPLATE, DEFAULT_MASK_TEMPLATE) ?: DEFAULT_MASK_TEMPLATE
-        selectedWordlistUri = preferences.getString(PREFERENCE_WORDLIST_URI, null)?.let(Uri::parse)
-        if (selectedWordlistUri != null && !hasReadableFile(selectedWordlistUri!!)) {
-            selectedWordlistUri = null
-            appendHashcatLog(getString(R.string.wordlist_missing))
+    /**
+     * Requests notification access so the foreground Hashcat run is visible in
+     * the notification shade on Android 13 and newer devices.
+     */
+    private fun requestNotificationPermission()
+    {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU)
+        {
+            return
         }
-    }
 
-    private fun hasReadableFile(uri: Uri): Boolean {
-        return try {
-            contentResolver.openInputStream(uri)?.use { }
-            true
-        } catch (_: Throwable) {
-            false
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+        {
+            return
         }
+
+        requestPermissions(
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            REQUEST_POST_NOTIFICATIONS
+        )
     }
 
     private fun toggleTheme()
@@ -704,7 +456,6 @@ class MainActivity : Activity()
     {
         if (savedInstanceState == null)
         {
-            restoreHashcatPreferences()
             return
         }
 
@@ -743,6 +494,9 @@ class MainActivity : Activity()
             STATE_MASK_MAX_LENGTH,
             DEFAULT_MASK_MAX_LENGTH
         )
+        selectedMemoryProfile = parseMemoryProfile(
+            savedInstanceState.getString(STATE_MEMORY_PROFILE)
+        )
 
         selectedCaptureUri?.let { uri ->
             binding.selectedFileTextView.text = getString(
@@ -779,6 +533,116 @@ class MainActivity : Activity()
                 queryDisplayName(uri)
             )
             describeWordlistUri(uri)
+        }
+    }
+
+    /**
+     * Restores persisted Hashcat launch settings for a fresh Activity instance.
+     * A saved wordlist is applied only while its document URI remains readable.
+     */
+    private fun restorePersistentHashcatState()
+    {
+        val preferences = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+
+        selectedHashMode = preferences.getInt(PREFERENCE_HASH_MODE, DEFAULT_HASH_MODE)
+        candidateSource = preferences.getString(
+            PREFERENCE_CANDIDATE_SOURCE,
+            CANDIDATE_SOURCE_TEMPLATE
+        ) ?: CANDIDATE_SOURCE_TEMPLATE
+        maskTemplate = preferences.getString(
+            PREFERENCE_MASK_TEMPLATE,
+            DEFAULT_MASK_TEMPLATE
+        ) ?: DEFAULT_MASK_TEMPLATE
+        maskCharset = preferences.getString(
+            PREFERENCE_MASK_CHARSET,
+            DEFAULT_MASK_CHARSET
+        ) ?: DEFAULT_MASK_CHARSET
+        maskMinLength = preferences.getInt(
+            PREFERENCE_MASK_MIN_LENGTH,
+            DEFAULT_MASK_MIN_LENGTH
+        )
+        maskMaxLength = preferences.getInt(
+            PREFERENCE_MASK_MAX_LENGTH,
+            DEFAULT_MASK_MAX_LENGTH
+        )
+        selectedMemoryProfile = parseMemoryProfile(
+            preferences.getString(PREFERENCE_MEMORY_PROFILE, null)
+        )
+
+        restorePersistentWordlist(preferences)
+    }
+
+    /**
+     * Restores the saved wordlist URI when Android still grants read access to
+     * the selected document.
+     */
+    private fun restorePersistentWordlist(preferences: android.content.SharedPreferences)
+    {
+        val uri = preferences.getString(PREFERENCE_WORDLIST_URI, null)
+            ?.let(Uri::parse)
+            ?.takeIf(::isReadableUri)
+
+        if (uri == null)
+        {
+            selectedWordlistUri = null
+            if (candidateSource == CANDIDATE_SOURCE_WORDLIST)
+            {
+                candidateSource = CANDIDATE_SOURCE_TEMPLATE
+            }
+            return
+        }
+
+        selectedWordlistUri = uri
+        binding.wordlistFileTextView.text = getString(
+            R.string.selected_wordlist,
+            queryDisplayName(uri)
+        )
+        describeWordlistUri(uri)
+    }
+
+    /**
+     * Persists the current hash mode for the next application launch.
+     */
+    private fun saveHashMode()
+    {
+        getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(PREFERENCE_HASH_MODE, selectedHashMode)
+            .apply()
+    }
+
+    /**
+     * Persists candidate-source, mask and wordlist settings for the next
+     * application launch.
+     */
+    private fun saveCandidateSettings()
+    {
+        getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(PREFERENCE_CANDIDATE_SOURCE, candidateSource)
+            .putString(PREFERENCE_MASK_TEMPLATE, maskTemplate)
+            .putString(PREFERENCE_MASK_CHARSET, maskCharset)
+            .putInt(PREFERENCE_MASK_MIN_LENGTH, maskMinLength)
+            .putInt(PREFERENCE_MASK_MAX_LENGTH, maskMaxLength)
+            .putString(PREFERENCE_WORDLIST_URI, selectedWordlistUri?.toString())
+            .apply()
+    }
+
+    /**
+     * Returns true when a Storage Access Framework URI can still be opened for
+     * reading by this app process.
+     */
+    private fun isReadableUri(uri: Uri): Boolean
+    {
+        return try
+        {
+            val input = contentResolver.openInputStream(uri) ?: return false
+            input.close()
+            true
+        }
+        catch (_: Throwable)
+        {
+            false
         }
     }
 
@@ -893,13 +757,13 @@ class MainActivity : Activity()
 
         selectedWordlistUri = uri
         candidateSource = CANDIDATE_SOURCE_WORDLIST
+        saveCandidateSettings()
         binding.wordlistFileTextView.text = getString(
             R.string.selected_wordlist,
             queryDisplayName(uri)
         )
         describeWordlistUri(uri)
         renderCandidateSource()
-        saveHashcatPreferences()
 
         updateHashcatStartState()
     }
@@ -1042,6 +906,7 @@ class MainActivity : Activity()
                     if (hashModes.none { it.mode == selectedHashMode })
                     {
                         selectedHashMode = hashModes.first().mode
+                        saveHashMode()
                     }
 
                     renderSelectedHashMode()
@@ -1086,8 +951,8 @@ class MainActivity : Activity()
             selectedMode = selectedHashMode
         ) { mode ->
             selectedHashMode = mode.mode
+            saveHashMode()
             renderSelectedHashMode()
-            saveHashcatPreferences()
         }.show()
     }
 
@@ -1110,7 +975,7 @@ class MainActivity : Activity()
             this,
             mode
         )
-        binding.hashModeButton.isEnabled = !isHashcatBusy()
+        binding.hashModeButton.isEnabled = !hashcatRunner.isRunning()
     }
 
     private fun showMaskAssistant()
@@ -1127,9 +992,9 @@ class MainActivity : Activity()
             maskCharset = settings.charset
             maskMinLength = settings.minLength
             maskMaxLength = settings.maxLength
+            saveCandidateSettings()
             renderCandidateSource()
             updateHashcatStartState()
-            saveHashcatPreferences()
         }.show()
     }
 
@@ -1145,9 +1010,9 @@ class MainActivity : Activity()
         binding.wordlistFileTextView.visibility = if (useTemplate) View.GONE else View.VISIBLE
         binding.wordlistFileInfoTextView.visibility = if (useTemplate) View.GONE else View.VISIBLE
         binding.selectWordlistButton.visibility = if (useTemplate) View.GONE else View.VISIBLE
-        binding.maskTemplateEditText.isEnabled = useTemplate && !isHashcatBusy()
-        binding.maskAssistantButton.isEnabled = useTemplate && !isHashcatBusy()
-        binding.selectWordlistButton.isEnabled = !useTemplate && !isHashcatBusy()
+        binding.maskTemplateEditText.isEnabled = useTemplate && !hashcatRunner.isRunning()
+        binding.maskAssistantButton.isEnabled = useTemplate && !hashcatRunner.isRunning()
+        binding.selectWordlistButton.isEnabled = !useTemplate && !hashcatRunner.isRunning()
 
         if (binding.maskTemplateEditText.text.toString() != maskTemplate)
         {
@@ -1170,9 +1035,158 @@ class MainActivity : Activity()
         )
     }
 
+    private fun setupMemoryProfileSpinner()
+    {
+        val adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            memoryProfileLabels()
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+
+        binding.memoryProfileSpinner.adapter = adapter
+        binding.memoryProfileSpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener
+            {
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long
+                )
+                {
+                    val memoryProfile = memoryProfileAt(position)
+
+                    if (memoryProfile != selectedMemoryProfile)
+                    {
+                        selectedMemoryProfile = memoryProfile
+                        saveMemoryProfile(selectedMemoryProfile)
+                    }
+                }
+
+                override fun onNothingSelected(parent: AdapterView<*>?)
+                {
+                }
+            }
+    }
+
+    private fun renderMemoryProfile()
+    {
+        binding.memoryProfileSpinner.setSelection(
+            memoryProfileIndex(selectedMemoryProfile),
+            false
+        )
+    }
+
+    private fun memoryProfileLabels(): List<String>
+    {
+        return listOf(
+            getString(R.string.memory_profile_auto),
+            getString(R.string.memory_profile_low),
+            getString(R.string.memory_profile_balanced),
+            getString(R.string.memory_profile_high)
+        )
+    }
+
+    private fun memoryProfileAt(position: Int): HashcatRunner.MemoryProfile
+    {
+        return when (position)
+        {
+            1 -> HashcatRunner.MemoryProfile.LOW
+            2 -> HashcatRunner.MemoryProfile.BALANCED
+            3 -> HashcatRunner.MemoryProfile.HIGH
+            else -> HashcatRunner.MemoryProfile.AUTO
+        }
+    }
+
+    private fun memoryProfileIndex(memoryProfile: HashcatRunner.MemoryProfile): Int
+    {
+        return when (memoryProfile)
+        {
+            HashcatRunner.MemoryProfile.AUTO -> 0
+            HashcatRunner.MemoryProfile.LOW -> 1
+            HashcatRunner.MemoryProfile.BALANCED -> 2
+            HashcatRunner.MemoryProfile.HIGH -> 3
+        }
+    }
+
+    private fun loadMemoryProfile(): HashcatRunner.MemoryProfile
+    {
+        val preferences = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+
+        return parseMemoryProfile(preferences.getString(PREFERENCE_MEMORY_PROFILE, null))
+    }
+
+    private fun saveMemoryProfile(memoryProfile: HashcatRunner.MemoryProfile)
+    {
+        getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(PREFERENCE_MEMORY_PROFILE, memoryProfile.name)
+            .apply()
+    }
+
+    private fun parseMemoryProfile(value: String?): HashcatRunner.MemoryProfile
+    {
+        return HashcatRunner.MemoryProfile.values().firstOrNull { memoryProfile ->
+            memoryProfile.name == value
+        } ?: HashcatRunner.MemoryProfile.AUTO
+    }
+
+    private fun requestHashcatStop(reason: String)
+    {
+        if (hashcatRunState == HashcatRunState.STOPPING || hashcatRunState == HashcatRunState.IDLE)
+        {
+            return
+        }
+
+        hashcatRunState = HashcatRunState.STOPPING
+        hashcatStatus = hashcatStatus.copy(
+            state = getString(R.string.hashcat_status_stopping)
+        )
+        renderHashcatStatus()
+        appendHashcatLog(getString(R.string.hashcat_stopping))
+        binding.startHashcatButton.text = getString(R.string.hashcat_status_stopping)
+        binding.startHashcatButton.isEnabled = false
+        hashcatRunner.stop(reason)
+    }
+
+    private fun finishHashcatStop()
+    {
+        hashcatRunState = HashcatRunState.IDLE
+        stopHashcatForegroundService()
+        setHashcatBusy(false)
+        hashcatStatus = hashcatStatus.copy(
+            state = getString(R.string.hashcat_status_finished)
+        )
+        renderHashcatStatus()
+    }
+
+    private fun startHashcatForegroundService()
+    {
+        startForegroundService(
+            Intent(this, HashcatForegroundService::class.java).setAction(
+                HashcatForegroundService.ACTION_START
+            )
+        )
+    }
+
+    private fun stopHashcatForegroundService()
+    {
+        startService(
+            Intent(this, HashcatForegroundService::class.java).setAction(
+                HashcatForegroundService.ACTION_STOP
+            )
+        )
+    }
+
     private fun startHashcat()
     {
-        val service = hashcatService ?: return
+        if (hashcatRunState != HashcatRunState.IDLE)
+        {
+            return
+        }
+
         val hashUri = selectedHashUri
         val clipboardHashFile = selectedHashClipboardFile
         val hashMode = selectedHashMode
@@ -1182,22 +1196,23 @@ class MainActivity : Activity()
             return
         }
 
-        requestHashcatNotificationPermissionIfNeeded()
+        hashcatRunState = HashcatRunState.STARTING
+        hashcatMemoryInfo = null
+        renderHashcatMemoryInfo()
         clearHashcatLog()
+        startHashcatForegroundService()
         hashcatStartedAtRealtime = SystemClock.elapsedRealtime()
-        hashcatInputPreparationStopRequested = false
-        hashcatInputPreparationActive = true
         hashcatStatus = HashcatStatus(
             state = getString(R.string.hashcat_status_preparing)
         )
         renderHashcatStatus()
-        renderHashcatExecutionControls()
-        startHashcatStatusTicker()
+        setHashcatBusy(true)
         appendHashcatLog(getString(R.string.hashcat_preparing))
 
-        hashcatInputPreparationThread = thread(name = "hashcat-input-copy") {
-            try
-            {
+        thread(name = "hashcat-input-copy") {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+
+            try            {
                 val inputDirectory = File(cacheDir, "hashcat-input").apply {
                     mkdirs()
                 }
@@ -1220,12 +1235,6 @@ class MainActivity : Activity()
                 {
                     val wordlistUri = selectedWordlistUri
                         ?: error(getString(R.string.no_wordlist_selected))
-                    if (!hasReadableFile(wordlistUri))
-                    {
-                        selectedWordlistUri = null
-                        saveHashcatPreferences()
-                        error(getString(R.string.wordlist_missing))
-                    }
                     HashcatRunner.CandidateSource.Wordlist(
                         copyUriToFile(
                             wordlistUri,
@@ -1235,138 +1244,38 @@ class MainActivity : Activity()
                 }
                 val recoveredFile = createRecoveredOutputFile(hashFile, hashUri)
 
-                if (hashcatInputPreparationStopRequested)
+                if (hashcatRunState == HashcatRunState.STOPPING)
                 {
-                    completeHashcatPreparationStop()
+                    runOnUiThread {
+                        finishHashcatStop()
+                    }
                     return@thread
                 }
 
-                startForegroundService(
-                    Intent(this, HashcatForegroundService::class.java)
-                        .setAction(HashcatForegroundService.ACTION_ENTER_FOREGROUND)
+                hashcatRunner.start(
+                    hashFile = hashFile,
+                    candidateSource = source,
+                    hashMode = hashMode,
+                    recoveredFile = recoveredFile,
+                    memoryProfile = selectedMemoryProfile,
+                    listener = createHashcatListener(recoveredFile)
                 )
-
-                val accepted = service.startHashcat(
-                    HashcatForegroundService.StartRequest(
-                        hashFile = hashFile,
-                        candidateSource = source,
-                        hashMode = hashMode,
-                        recoveredFile = recoveredFile,
-                        memoryProfile = selectedMemoryProfile
-                    )
-                )
-
-                if (!accepted)
-                {
-                    error("Hashcat foreground service already owns an active job.")
-                }
-
-                if (hashcatInputPreparationStopRequested)
-                {
-                    hashcatInputPreparationActive = false
-                    service.stopHashcat("stop requested during service handoff")
-                    return@thread
-                }
-
-                runOnUiThread {
-                    hashcatInputPreparationActive = false
-                    hashcatServiceState = HashcatForegroundService.State.STARTING
-                    hashcatStatus = hashcatStatus.copy(
-                        state = getString(R.string.hashcat_status_starting)
-                    )
-                    renderHashcatStatus()
-                    renderHashcatExecutionControls()
-                    appendHashcatLog(getString(R.string.hashcat_starting_backend))
-                }
             }
             catch (error: Throwable)
             {
-                if (hashcatInputPreparationStopRequested)
-                {
-                    completeHashcatPreparationStop()
-                }
-                else
-                {
-                    runOnUiThread {
-                        hashcatInputPreparationActive = false
-                        hashcatStatus = hashcatStatus.copy(
-                            state = getString(R.string.hashcat_status_error)
-                        )
-                        renderHashcatStatus()
-                        stopHashcatStatusTicker()
-                        renderHashcatExecutionControls()
-                        appendHashcatLog(
-                            "ERROR: ${error.message ?: error.javaClass.simpleName}"
-                        )
-                    }
+                runOnUiThread {
+                    hashcatRunState = HashcatRunState.IDLE
+                    stopHashcatForegroundService()
+                    setHashcatBusy(false)
+                    hashcatStatus = hashcatStatus.copy(
+                        state = getString(R.string.hashcat_status_error)
+                    )
+                    renderHashcatStatus()
+                    appendHashcatLog(
+                        "ERROR: ${error.message ?: error.javaClass.simpleName}"
+                    )
                 }
             }
-            finally
-            {
-                hashcatInputPreparationThread = null
-            }
-        }
-    }
-
-    private fun requestHashcatStopDuringPreparation()
-    {
-        if (!hashcatInputPreparationActive || hashcatInputPreparationStopRequested)
-        {
-            return
-        }
-
-        hashcatInputPreparationStopRequested = true
-        hashcatInputPreparationThread?.interrupt()
-        hashcatStatus = hashcatStatus.copy(
-            state = getString(R.string.hashcat_status_stopping)
-        )
-        renderHashcatStatus()
-        renderHashcatExecutionControls()
-        appendHashcatLog(getString(R.string.hashcat_stopping))
-    }
-
-    private fun requestHashcatStop()
-    {
-        if (hashcatServiceState != HashcatForegroundService.State.STARTING &&
-            hashcatServiceState != HashcatForegroundService.State.RUNNING)
-        {
-            return
-        }
-
-        hashcatStatus = hashcatStatus.copy(
-            state = getString(R.string.hashcat_status_stopping)
-        )
-        renderHashcatStatus()
-        appendHashcatLog(getString(R.string.hashcat_stopping))
-        hashcatService?.stopHashcat("start/stop button")
-        renderHashcatExecutionControls()
-    }
-
-    private fun completeHashcatPreparationStop()
-    {
-        runOnUiThread {
-            hashcatInputPreparationActive = false
-            hashcatInputPreparationStopRequested = false
-            hashcatStatus = hashcatStatus.copy(
-                state = getString(R.string.hashcat_status_stopped)
-            )
-            renderHashcatStatus()
-            stopHashcatStatusTicker()
-            renderHashcatExecutionControls()
-            appendHashcatLog(getString(R.string.hashcat_stopped))
-        }
-    }
-
-    private fun requestHashcatNotificationPermissionIfNeeded()
-    {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-                PackageManager.PERMISSION_GRANTED)
-        {
-            requestPermissions(
-                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                REQUEST_HASHCAT_NOTIFICATIONS
-            )
         }
     }
 
@@ -1422,6 +1331,136 @@ class MainActivity : Activity()
                 }
             }
         }
+    }
+
+    private fun createHashcatListener(recoveredFile: File): HashcatRunner.Listener
+    {
+        return object : HashcatRunner.Listener
+        {
+            override fun onStarted(command: List<String>)
+            {
+                runOnUiThread {
+                    if (hashcatRunState == HashcatRunState.STOPPING)
+                    {
+                        hashcatRunner.stop("stop requested before native start callback")
+                        return@runOnUiThread
+                    }
+
+                    appendHashcatLog(
+                        "$ " + command.joinToString(" ")
+                    )
+                }
+            }
+
+            override fun onOutput(line: String)
+            {
+                if (hashcatRunState == HashcatRunState.STARTING)
+                {
+                    val startupState = when
+                    {
+                        line.contains("Initialized backend runtimes", ignoreCase = true) ->
+                            getString(R.string.hashcat_status_backend_initialized)
+                        line.contains("OpenCL API", ignoreCase = true) ->
+                            getString(R.string.hashcat_status_opencl_initialized)
+                        line.startsWith("Initializing device kernels and memory", ignoreCase = true) ->
+                            getString(R.string.hashcat_status_kernels_memory)
+                        line.startsWith("Starting autotune", ignoreCase = true) ->
+                            getString(R.string.hashcat_status_autotune)
+                        line.startsWith("Status") && line.contains("Running", ignoreCase = true) ->
+                            getString(R.string.hashcat_status_running)
+                        else -> null
+                    }
+
+                    if (startupState != null)
+                    {
+                        runOnUiThread {
+                            if (line.startsWith("Status") && line.contains("Running", ignoreCase = true))
+                            {
+                                hashcatRunState = HashcatRunState.RUNNING
+                            }
+
+                            hashcatStatus = hashcatStatus.copy(state = startupState)
+                            renderHashcatStatus()
+                        }
+                    }
+                }
+
+                appendHashcatLog(line)
+            }
+
+            override fun onFinished(exitCode: Int)
+            {
+                runOnUiThread {
+                    hashcatRunState = HashcatRunState.IDLE
+                    stopHashcatForegroundService()
+                    setHashcatBusy(false)
+                    hashcatStatus = hashcatStatus.copy(
+                        state = getString(R.string.hashcat_status_finished)
+                    )
+                    renderHashcatStatus()
+                    appendHashcatLog(
+                        getString(R.string.hashcat_finished, exitCode)
+                    )
+                    if (exitCode == 0 && recoveredFile.isFile && recoveredFile.length() > 0L)
+                    {
+                        appendHashcatLog(
+                            getString(
+                                R.string.hashcat_result_saved,
+                                recoveredFile.absolutePath
+                            )
+                        )
+                    }
+                }
+            }
+
+            override fun onError(error: Throwable)
+            {
+                runOnUiThread {
+                    hashcatRunState = HashcatRunState.IDLE
+                    stopHashcatForegroundService()
+                    setHashcatBusy(false)
+                    hashcatStatus = hashcatStatus.copy(
+                        state = getString(R.string.hashcat_status_error)
+                    )
+                    renderHashcatStatus()
+                    appendHashcatLog(
+                        "ERROR: ${error.message ?: error.javaClass.simpleName}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Stores the complete host-memory summary emitted by Hashcat for the current
+     * attack. The UI presents Hashcat's own value instead of reconstructing it
+     * from internal allocation diagnostics.
+     */
+    private fun updateHashcatMemoryInfoFromOutput(line: String): Boolean
+    {
+        val value = when
+        {
+            line.startsWith("Host memory allocated for this attack:", ignoreCase = true) ->
+                line.trim()
+            line.contains("Not enough allocatable device memory", ignoreCase = true) ->
+                getString(R.string.hashcat_memory_info_not_enough)
+            else -> return false
+        }
+
+        if (hashcatMemoryInfo == value)
+        {
+            return false
+        }
+
+        hashcatMemoryInfo = value
+
+        return true
+    }
+
+    private fun renderHashcatMemoryInfo()
+    {
+        binding.hashcatMemoryInfoTextView.text =
+            hashcatMemoryInfo ?: getString(R.string.hashcat_memory_info_empty)
     }
 
     private fun updateHashcatStatusFromOutput(line: String): Boolean
@@ -1496,17 +1535,6 @@ class MainActivity : Activity()
         )
     }
 
-    private fun startHashcatStatusTicker()
-    {
-        hashcatLogHandler.removeCallbacks(hashcatStatusTickRunnable)
-        hashcatLogHandler.post(hashcatStatusTickRunnable)
-    }
-
-    private fun stopHashcatStatusTicker()
-    {
-        hashcatLogHandler.removeCallbacks(hashcatStatusTickRunnable)
-    }
-
     private fun formatDuration(milliseconds: Long): String
     {
         val totalSeconds = (milliseconds / 1000).coerceAtLeast(0)
@@ -1553,8 +1581,7 @@ class MainActivity : Activity()
             hashcatLogFlushScheduled = false
         }
 
-        hashcatLogFollowTail = true
-        binding.hashcatLogTextView.text = ""
+        binding.hashcatLogTextView.setLogText("")
     }
 
     /**
@@ -1565,7 +1592,7 @@ class MainActivity : Activity()
      */
     private fun appendHashcatLog(line: String)
     {
-        appendHashcatLogcat(line)
+        android.util.Log.i("Hashcat", line)
 
         var scheduleFlush = false
 
@@ -1589,34 +1616,6 @@ class MainActivity : Activity()
         }
     }
 
-    /**
-     * Writes complete Hashcat output to Logcat by splitting records that exceed
-     * Android's practical single-message size.
-     */
-    private fun appendHashcatLogcat(line: String)
-    {
-        if (line.length <= LOGCAT_MESSAGE_CHARS)
-        {
-            android.util.Log.i("Hashcat", line)
-            return
-        }
-
-        val totalParts = (line.length + LOGCAT_MESSAGE_CHARS - 1) / LOGCAT_MESSAGE_CHARS
-        var offset = 0
-        var part = 1
-
-        while (offset < line.length)
-        {
-            val end = (offset + LOGCAT_MESSAGE_CHARS).coerceAtMost(line.length)
-            android.util.Log.i(
-                "Hashcat",
-                "[$part/$totalParts] " + line.substring(offset, end)
-            )
-            offset = end
-            part++
-        }
-    }
-
     private fun flushHashcatLog()
     {
         val pending = ArrayList<String>()
@@ -1637,11 +1636,16 @@ class MainActivity : Activity()
         }
 
         var statusChanged = false
+        var memoryChanged = false
 
         pending.forEach { line ->
             if (updateHashcatStatusFromOutput(line))
             {
                 statusChanged = true
+            }
+            if (updateHashcatMemoryInfoFromOutput(line))
+            {
+                memoryChanged = true
             }
 
             val statusKey = hashcatLiveStatusKey(line)
@@ -1659,13 +1663,17 @@ class MainActivity : Activity()
         {
             renderHashcatStatus()
         }
+        if (memoryChanged)
+        {
+            renderHashcatMemoryInfo()
+        }
 
         trimHashcatHistory()
 
         val estimatedChars = hashcatLogHistoryCharCount +
             hashcatLiveStatus.values.sumOf { it.length + 1 } + 2
 
-        binding.hashcatLogTextView.text = buildString(estimatedChars) {
+        binding.hashcatLogTextView.setLogText(buildString(estimatedChars) {
             hashcatLogHistory.forEach { line ->
                 append(line)
                 append('\n')
@@ -1681,17 +1689,7 @@ class MainActivity : Activity()
                     append('\n')
                 }
             }
-        }
-
-        if (hashcatLogFollowTail)
-        {
-            binding.hashcatLogScrollView.post {
-                if (hashcatLogFollowTail)
-                {
-                    binding.hashcatLogScrollView.fullScroll(View.FOCUS_DOWN)
-                }
-            }
-        }
+        })
 
         var scheduleNextFlush = false
 
@@ -1723,7 +1721,6 @@ class MainActivity : Activity()
     {
         val liveLines = hashcatLiveStatus.size
         val maxHistoryLines = (MAX_HASHCAT_LOG_LINES - liveLines).coerceAtLeast(0)
-
         while (
             hashcatLogHistory.size > maxHistoryLines ||
             hashcatLogHistoryCharCount > MAX_HASHCAT_LOG_CHARS
@@ -1782,34 +1779,8 @@ class MainActivity : Activity()
         binding.convertButton.isEnabled = !busy && selectedCaptureUri != null
     }
 
-    private fun isHashcatBusy(): Boolean
+    private fun setHashcatBusy(busy: Boolean)
     {
-        return hashcatInputPreparationActive ||
-            hashcatServiceState != HashcatForegroundService.State.IDLE
-    }
-
-    private fun renderHashcatExecutionControls()
-    {
-        val busy = isHashcatBusy()
-        val stopAvailable = when
-        {
-            hashcatInputPreparationActive -> !hashcatInputPreparationStopRequested
-            hashcatServiceState == HashcatForegroundService.State.STARTING -> true
-            hashcatServiceState == HashcatForegroundService.State.RUNNING -> true
-            else -> false
-        }
-        val hasHashInput =
-            selectedHashUri != null ||
-            selectedHashClipboardFile?.isFile == true
-        val hasCandidates = if (candidateSource == CANDIDATE_SOURCE_TEMPLATE)
-        {
-            maskTemplate.isNotBlank()
-        }
-        else
-        {
-            selectedWordlistUri != null
-        }
-
         binding.hashcatProgressBar.visibility = if (busy)
         {
             View.VISIBLE
@@ -1824,37 +1795,56 @@ class MainActivity : Activity()
         binding.pasteHashButton.isEnabled = !busy
         binding.candidateTemplateRadioButton.isEnabled = !busy
         binding.candidateWordlistRadioButton.isEnabled = !busy
-        binding.maskTemplateEditText.isEnabled =
-            !busy && candidateSource == CANDIDATE_SOURCE_TEMPLATE
-        binding.maskAssistantButton.isEnabled =
-            !busy && candidateSource == CANDIDATE_SOURCE_TEMPLATE
-        binding.selectWordlistButton.isEnabled =
-            !busy && candidateSource == CANDIDATE_SOURCE_WORDLIST
+        binding.maskTemplateEditText.isEnabled = !busy && candidateSource == CANDIDATE_SOURCE_TEMPLATE
+        binding.maskAssistantButton.isEnabled = !busy && candidateSource == CANDIDATE_SOURCE_TEMPLATE
+        binding.selectWordlistButton.isEnabled = !busy && candidateSource == CANDIDATE_SOURCE_WORDLIST
+        binding.memoryProfileSpinner.isEnabled = !busy
+        binding.startHashcatButton.text = when (hashcatRunState)
+        {
+            HashcatRunState.STARTING,
+            HashcatRunState.RUNNING -> getString(R.string.stop_hashcat)
+            HashcatRunState.STOPPING -> getString(R.string.hashcat_status_stopping)
+            HashcatRunState.IDLE -> getString(R.string.start_hashcat)
+        }
+        binding.startHashcatButton.isEnabled = hashcatRunState == HashcatRunState.STARTING ||
+            hashcatRunState == HashcatRunState.RUNNING
 
-        binding.startHashcatButton.text = if (busy)
+        if (!busy)
         {
-            getString(R.string.stop_hashcat)
-        }
-        else
-        {
-            getString(R.string.start_hashcat)
-        }
-        binding.startHashcatButton.isEnabled = if (busy)
-        {
-            stopAvailable
-        }
-        else
-        {
-            hasHashInput &&
-                hasCandidates &&
-                hashcatReady &&
-                hashcatServiceBound
+            updateHashcatStartState()
         }
     }
 
     private fun updateHashcatStartState()
     {
-        renderHashcatExecutionControls()
+        val hasHashInput =
+            selectedHashUri != null ||
+            selectedHashClipboardFile?.isFile == true
+        val hasCandidates = if (candidateSource == CANDIDATE_SOURCE_TEMPLATE)
+        {
+            maskTemplate.isNotBlank()
+        }
+        else
+        {
+            selectedWordlistUri != null
+        }
+
+        binding.startHashcatButton.text = when (hashcatRunState)
+        {
+            HashcatRunState.STARTING,
+            HashcatRunState.RUNNING -> getString(R.string.stop_hashcat)
+            HashcatRunState.STOPPING -> getString(R.string.hashcat_status_stopping)
+            HashcatRunState.IDLE -> getString(R.string.start_hashcat)
+        }
+        binding.startHashcatButton.isEnabled = when (hashcatRunState)
+        {
+            HashcatRunState.STARTING,
+            HashcatRunState.RUNNING -> true
+            HashcatRunState.STOPPING -> false
+            HashcatRunState.IDLE -> hasHashInput &&
+                hasCandidates &&
+                hashcatReady
+        }
     }
 
     private fun createRecoveredOutputFile(
@@ -2213,15 +2203,18 @@ class MainActivity : Activity()
         const val REQUEST_CREATE_OUTPUT = 1002
         const val REQUEST_OPEN_HASH_FILE = 1003
         const val REQUEST_OPEN_WORDLIST = 1004
-        const val REQUEST_HASHCAT_NOTIFICATIONS = 1005
+        const val REQUEST_POST_NOTIFICATIONS = 1005
 
         const val PREFERENCES_NAME = "hashcat_ui"
         const val PREFERENCE_THEME = "theme"
         const val PREFERENCE_LANGUAGE = "language"
+        const val PREFERENCE_MEMORY_PROFILE = "memory_profile"
         const val PREFERENCE_HASH_MODE = "hash_mode"
         const val PREFERENCE_CANDIDATE_SOURCE = "candidate_source"
         const val PREFERENCE_MASK_TEMPLATE = "mask_template"
-        const val PREFERENCE_MEMORY_PROFILE = "memory_profile"
+        const val PREFERENCE_MASK_CHARSET = "mask_charset"
+        const val PREFERENCE_MASK_MIN_LENGTH = "mask_min_length"
+        const val PREFERENCE_MASK_MAX_LENGTH = "mask_max_length"
         const val PREFERENCE_WORDLIST_URI = "wordlist_uri"
         const val THEME_LIGHT = "light"
         const val THEME_DARK = "dark"
@@ -2239,6 +2232,7 @@ class MainActivity : Activity()
         const val STATE_MASK_CHARSET = "mask_charset"
         const val STATE_MASK_MIN_LENGTH = "mask_min_length"
         const val STATE_MASK_MAX_LENGTH = "mask_max_length"
+        const val STATE_MEMORY_PROFILE = "memory_profile"
 
         const val CANDIDATE_SOURCE_TEMPLATE = "template"
         const val CANDIDATE_SOURCE_WORDLIST = "wordlist"
@@ -2252,9 +2246,6 @@ class MainActivity : Activity()
 
         const val MAX_HASHCAT_LOG_LINES = 300
         const val MAX_HASHCAT_LOG_CHARS = 128 * 1024
-        const val LOGCAT_MESSAGE_CHARS = 3500
-        const val HASHCAT_LOG_FLUSH_DELAY_MS = 250L
-        const val HASHCAT_STATUS_TICK_MS = 1000L
-        const val HASHCAT_LOG_BOTTOM_SLOP_DP = 32
+        const val HASHCAT_LOG_FLUSH_DELAY_MS = 750L
     }
 }
