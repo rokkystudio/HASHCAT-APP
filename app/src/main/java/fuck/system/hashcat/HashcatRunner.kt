@@ -97,8 +97,8 @@ class HashcatRunner(
     }
 
     /**
-     * Reads the hash-mode catalog generated from the same Hashcat release as the
-     * published Android binaries.
+     * Reads the hash-mode catalog generated from the same pinned upstream
+     * Hashcat build as the published Android binaries.
      */
     fun loadHashModes(): List<HashMode>
     {

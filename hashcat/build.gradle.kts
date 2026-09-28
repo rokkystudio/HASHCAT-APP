@@ -52,11 +52,9 @@ val prepareHashcatRuntime by tasks.registering(Sync::class) {
             include(
                 "modules/**",
                 "bridges/**",
-                "feeds/**",
                 "OpenCL/**",
                 "rules/**",
                 "tunings/**",
-                "pcfg/**",
                 "hashcat.hcstat2"
             )
             into("assets/hashcat/$abi")
@@ -66,6 +64,11 @@ val prepareHashcatRuntime by tasks.registering(Sync::class) {
             include("hashcat")
             into("jniLibs/$abi")
             rename("hashcat", "libhashcat_exec.so")
+        }
+
+        from(zipTree(archive.asFile)) {
+            include("libc++_shared.so")
+            into("jniLibs/$abi")
         }
 
         from(publishedAndroidLibraries.getValue(abi).asFile) {
