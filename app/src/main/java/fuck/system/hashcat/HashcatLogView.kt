@@ -6,6 +6,7 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.AttributeSet
+import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import android.widget.OverScroller
@@ -24,7 +25,11 @@ class HashcatLogView @JvmOverloads constructor(
 {
     private val textPaint = TextPaint(TextPaint.ANTI_ALIAS_FLAG).apply {
         color = ContextCompat.getColor(context, R.color.text_primary)
-        textSize = 12f * resources.displayMetrics.scaledDensity
+        textSize = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP,
+            12f,
+            resources.displayMetrics
+        )
         typeface = android.graphics.Typeface.MONOSPACE
     }
     private val scroller = OverScroller(context)

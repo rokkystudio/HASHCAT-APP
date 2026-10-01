@@ -43,7 +43,7 @@ if (missingPublishedLibraries.isNotEmpty()) {
     )
 }
 
-val prepareHashcatRuntime by tasks.registering(Sync::class) {
+val prepareHashcatRuntime = tasks.register<Sync>("prepareHashcatRuntime") {
     group = "build setup"
     description = "Extracts every published Hashcat Android ABI into generated Android sources."
 
@@ -97,8 +97,8 @@ android {
     sourceSets {
         getByName("main") {
             manifest.srcFile("android/src/main/AndroidManifest.xml")
-            assets.srcDir("build/generated/hashcatRuntime/assets")
-            jniLibs.srcDir("build/generated/hashcatRuntime/jniLibs")
+            assets.directories.add("build/generated/hashcatRuntime/assets")
+            jniLibs.directories.add("build/generated/hashcatRuntime/jniLibs")
         }
     }
 

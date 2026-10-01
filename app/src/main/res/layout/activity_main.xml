@@ -32,14 +32,30 @@
             android:layout_weight="1"
             android:orientation="vertical">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:includeFontPadding="false"
-                android:text="@string/app_name"
-                android:textColor="@color/text_primary"
-                android:textSize="22sp"
-                android:textStyle="bold" />
+                android:gravity="bottom"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:text="@string/app_name"
+                    android:textColor="@color/text_primary"
+                    android:textSize="22sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/appVersionTextView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:includeFontPadding="false"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="10sp" />
+            </LinearLayout>
 
             <TextView
                 android:layout_width="match_parent"
@@ -105,23 +121,34 @@
                     android:orientation="vertical"
                     android:padding="14dp">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:includeFontPadding="false"
-                        android:text="@string/hash_file_panel_title"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:includeFontPadding="false"
-                        android:text="@string/hash_file_panel_description"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:includeFontPadding="false"
+                            android:text="@string/hash_file_panel_title"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/hashFileInfoButton"
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:background="@drawable/bg_button"
+                            android:stateListAnimator="@null"
+                            android:text="@string/info_button"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+                    </LinearLayout>
+
 
                     <TextView
                         android:id="@+id/hashFileTextView"
@@ -182,6 +209,7 @@
 
                 </LinearLayout>
 
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -190,14 +218,34 @@
                     android:orientation="vertical"
                     android:padding="14dp">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:includeFontPadding="false"
-                        android:labelFor="@id/hashModeButton"
-                        android:text="@string/hash_mode_label"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="12sp" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:includeFontPadding="false"
+                            android:labelFor="@id/hashModeButton"
+                            android:text="@string/hash_mode_label"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/hashModeInfoButton"
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:background="@drawable/bg_button"
+                            android:stateListAnimator="@null"
+                            android:text="@string/info_button"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+                    </LinearLayout>
 
                     <LinearLayout
                         android:id="@+id/hashModeButton"
@@ -218,7 +266,7 @@
                             android:layout_height="42dp"
                             android:padding="6dp"
                             android:src="@drawable/ic_hashcat"
-                            android:tint="@color/navigation_icon_active" />
+                            android:tint="@color/button_icon" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -259,7 +307,17 @@
 
                     </LinearLayout>
 
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/hash_mode_supported_files"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+
                 </LinearLayout>
+
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -269,50 +327,42 @@
                     android:orientation="vertical"
                     android:padding="14dp">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:includeFontPadding="false"
-                        android:text="@string/candidate_panel_title"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:includeFontPadding="false"
-                        android:text="@string/candidate_panel_description"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
-
-                    <RadioGroup
-                        android:id="@+id/candidateSourceRadioGroup"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
+                        android:gravity="center_vertical"
                         android:orientation="horizontal">
 
-                        <RadioButton
-                            android:id="@+id/candidateTemplateRadioButton"
+                        <TextView
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="@string/candidate_template"
+                            android:includeFontPadding="false"
+                            android:text="@string/candidate_panel_title"
                             android:textColor="@color/text_primary"
-                            android:textSize="13sp" />
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
 
-                        <RadioButton
-                            android:id="@+id/candidateWordlistRadioButton"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/candidate_wordlist"
+                        <Button
+                            android:id="@+id/candidateInfoButton"
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:background="@drawable/bg_button"
+                            android:stateListAnimator="@null"
+                            android:text="@string/info_button"
+                            android:textAllCaps="false"
                             android:textColor="@color/text_primary"
-                            android:textSize="13sp" />
+                            android:textSize="16sp" />
+                    </LinearLayout>
 
-                    </RadioGroup>
+                    <Spinner
+                        android:id="@+id/candidateSourceSpinner"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="12dp"
+                        android:background="@drawable/bg_input"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp" />
 
                     <TextView
                         android:id="@+id/maskTemplateLabelTextView"
@@ -346,31 +396,83 @@
                             android:textColor="@color/text_primary"
                             android:textSize="13sp" />
 
-                        <Button
+                        <ImageButton
                             android:id="@+id/maskAssistantButton"
-                            android:layout_width="104dp"
+                            android:layout_width="46dp"
                             android:layout_height="46dp"
                             android:layout_marginStart="8dp"
                             android:background="@drawable/bg_button"
-                            android:fontFamily="sans"
-                            android:stateListAnimator="@null"
-                            android:text="@string/mask_assistant_short"
-                            android:textAllCaps="false"
-                            android:textColor="@color/text_primary"
-                            android:textSize="13sp" />
+                            android:contentDescription="@string/edit_mask"
+                            android:padding="11dp"
+                            android:src="@drawable/ic_edit"
+                            android:tint="@color/button_icon" />
 
                     </LinearLayout>
 
-                    <TextView
-                        android:id="@+id/candidateTemplateInfoTextView"
+                    <LinearLayout
+                        android:id="@+id/candidateTemplateDetailsRow"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:includeFontPadding="false"
-                        android:textColor="@color/text_secondary"
-                        android:textIsSelectable="true"
-                        android:textSize="12sp" />
+                        android:layout_marginTop="10dp"
+                        android:gravity="bottom"
+                        android:orientation="horizontal">
 
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/mask_charset_field"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+
+                            <EditText
+                                android:id="@+id/candidateCharsetValueTextView"
+                                android:layout_width="match_parent"
+                                android:layout_height="44dp"
+                                android:layout_marginTop="5dp"
+                                android:background="@drawable/bg_input"
+                                android:fontFamily="monospace"
+                                android:inputType="textNoSuggestions"
+                                android:maxLines="1"
+                                android:paddingStart="10dp"
+                                android:paddingEnd="10dp"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="96dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/mask_length_field"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+
+                            <EditText
+                                android:id="@+id/candidateLengthValueTextView"
+                                android:layout_width="match_parent"
+                                android:layout_height="44dp"
+                                android:layout_marginTop="5dp"
+                                android:background="@drawable/bg_input"
+                                android:gravity="center"
+                                android:inputType="text"
+                                android:maxLines="1"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp" />
+                        </LinearLayout>
+                    </LinearLayout>
                     <TextView
                         android:id="@+id/wordlistFileTextView"
                         android:layout_width="match_parent"
@@ -408,6 +510,7 @@
 
                 </LinearLayout>
 
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -416,30 +519,39 @@
                     android:orientation="vertical"
                     android:padding="14dp">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:includeFontPadding="false"
-                        android:text="@string/memory_profile_title"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:includeFontPadding="false"
-                        android:text="@string/memory_profile_description"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:includeFontPadding="false"
+                            android:text="@string/memory_profile_title"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/memoryInfoButton"
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:background="@drawable/bg_button"
+                            android:stateListAnimator="@null"
+                            android:text="@string/info_button"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/hashcatMemoryInfoTextView"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:includeFontPadding="false"
                         android:text="@string/hashcat_memory_info_empty"
                         android:textColor="@color/text_secondary"
                         android:textIsSelectable="true"
@@ -454,6 +566,99 @@
                         android:paddingStart="12dp"
                         android:paddingEnd="12dp" />
                 </LinearLayout>
+
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/workload_title"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/workloadInfoButton"
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:background="@drawable/bg_button"
+                            android:stateListAnimator="@null"
+                            android:text="@string/info_button"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+                    </LinearLayout>
+
+                    <Spinner
+                        android:id="@+id/workloadSpinner"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="12dp"
+                        android:background="@drawable/bg_input"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp" />
+                </LinearLayout>
+
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/optimized_kernel_title"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/optimizedKernelInfoButton"
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:background="@drawable/bg_button"
+                            android:stateListAnimator="@null"
+                            android:text="@string/info_button"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+                    </LinearLayout>
+                    <android.widget.Switch
+                        android:id="@+id/optimizedKernelSwitch"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="10dp"
+                        android:gravity="center_vertical"
+                        android:text="@string/optimized_kernel_switch"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -472,30 +677,6 @@
                         android:textSize="16sp"
                         android:textStyle="bold" />
 
-                    <Button
-                        android:id="@+id/startHashcatButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="46dp"
-                        android:layout_marginTop="12dp"
-                        android:background="@drawable/bg_button"
-                        android:enabled="false"
-                        android:fontFamily="sans"
-                        android:stateListAnimator="@null"
-                        android:text="@string/start_hashcat"
-                        android:textAllCaps="false"
-                        android:textColor="@color/text_primary"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-
-                    <ProgressBar
-                        android:id="@+id/hashcatProgressBar"
-                        style="?android:attr/progressBarStyleHorizontal"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:indeterminate="true"
-                        android:visibility="gone" />
-
                     <TextView
                         android:id="@+id/hashcatStatusTextView"
                         android:layout_width="match_parent"
@@ -508,6 +689,42 @@
                         android:textIsSelectable="true"
                         android:textSize="12sp" />
 
+
+                    <TextView
+                        android:id="@+id/hashcatProgressPercentTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:gravity="end"
+                        android:text="@string/hashcat_progress_zero"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <ProgressBar
+                        android:id="@+id/hashcatProgressBar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="18dp"
+                        android:layout_marginTop="4dp"
+                        android:indeterminate="false"
+                        android:max="10000"
+                        android:progress="0" />
+
+                    <Button
+                        android:id="@+id/startHashcatButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="46dp"
+                        android:layout_marginTop="14dp"
+                        android:background="@drawable/bg_button"
+                        android:enabled="false"
+                        android:fontFamily="sans"
+                        android:stateListAnimator="@null"
+                        android:text="@string/start_hashcat"
+                        android:textAllCaps="false"
+                        android:textColor="@color/action_button_text_color"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
                 </LinearLayout>
 
             </LinearLayout>
@@ -536,29 +753,39 @@
                     android:orientation="vertical"
                     android:padding="14dp">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:includeFontPadding="false"
-                        android:text="@string/converter_title"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:includeFontPadding="false"
-                        android:text="@string/converter_description"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:includeFontPadding="false"
+                            android:text="@string/capture_selection_title"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/captureSelectionInfoButton"
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:background="@drawable/bg_button"
+                            android:stateListAnimator="@null"
+                            android:text="@string/info_button"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/selectedFileTextView"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="18dp"
+                        android:layout_marginTop="14dp"
                         android:includeFontPadding="false"
                         android:text="@string/no_file_selected"
                         android:textColor="@color/text_primary"
@@ -576,31 +803,81 @@
                         android:textIsSelectable="true"
                         android:textSize="12sp" />
 
-                    <Button
-                        android:id="@+id/selectCaptureButton"
+                    <LinearLayout
                         android:layout_width="match_parent"
-                        android:layout_height="46dp"
+                        android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
-                        android:background="@drawable/bg_button"
-                        android:fontFamily="sans"
-                        android:stateListAnimator="@null"
-                        android:text="@string/select_capture"
-                        android:textAllCaps="false"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/selectCaptureButton"
+                            android:layout_width="0dp"
+                            android:layout_height="46dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_button"
+                            android:fontFamily="sans"
+                            android:stateListAnimator="@null"
+                            android:text="@string/capture_from_file"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp" />
+
+                        <Button
+                            android:id="@+id/pasteCaptureButton"
+                            android:layout_width="0dp"
+                            android:layout_height="46dp"
+                            android:layout_marginStart="8dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_button"
+                            android:fontFamily="sans"
+                            android:stateListAnimator="@null"
+                            android:text="@string/capture_from_clipboard"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                </LinearLayout>
+
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:text="@string/converter_title"
                         android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/converter_short_description"
+                        android:textColor="@color/text_secondary"
                         android:textSize="13sp" />
 
                     <Button
                         android:id="@+id/convertButton"
                         android:layout_width="match_parent"
                         android:layout_height="46dp"
-                        android:layout_marginTop="10dp"
+                        android:layout_marginTop="12dp"
                         android:background="@drawable/bg_button"
                         android:enabled="false"
                         android:fontFamily="sans"
                         android:stateListAnimator="@null"
                         android:text="@string/convert_and_save"
                         android:textAllCaps="false"
-                        android:textColor="@color/text_primary"
+                        android:textColor="@color/action_button_text_color"
                         android:textSize="13sp"
                         android:textStyle="bold" />
 
@@ -624,54 +901,145 @@
                         android:textSize="13sp" />
 
                 </LinearLayout>
-
             </LinearLayout>
 
         </ScrollView>
+
+        <LinearLayout
+            android:id="@+id/passwordsScreen"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/passwords_title"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/passwordsEmptyTextView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/passwords_empty"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+
+                <ScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:layout_marginTop="8dp"
+                    android:fillViewport="true"
+                    android:overScrollMode="never">
+
+                    <LinearLayout
+                        android:id="@+id/passwordsListContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+                </ScrollView>
+
+                <Button
+                    android:id="@+id/clearPasswordsButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_button"
+                    android:enabled="false"
+                    android:stateListAnimator="@null"
+                    android:text="@string/clear_passwords"
+                    android:textAllCaps="false"
+                    android:textColor="@color/action_button_text_color"
+                    android:textSize="13sp" />
+            </LinearLayout>
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/hashcatLogScreen"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:orientation="vertical"
+            android:padding="12dp"
             android:visibility="gone">
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_card"
                 android:orientation="vertical"
-                android:padding="12dp">
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:text="@string/hashcat_log_title"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <view
+                    class="fuck.system.hashcat.HashcatLogView"
+                    android:id="@+id/hashcatLogTextView"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_log"
+                    android:padding="12dp" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:background="@drawable/bg_card"
-                    android:orientation="vertical"
-                    android:padding="14dp">
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal">
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:includeFontPadding="false"
-                        android:text="@string/hashcat_log_title"
+                    <Button
+                        android:id="@+id/clearHashcatLogButton"
+                        android:layout_width="0dp"
+                        android:layout_height="46dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_button"
+                        android:fontFamily="sans"
+                        android:stateListAnimator="@null"
+                        android:text="@string/clear_log"
+                        android:textAllCaps="false"
                         android:textColor="@color/text_primary"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
+                        android:textSize="13sp" />
 
-                    <view
-                        class="fuck.system.hashcat.HashcatLogView"
-                        android:id="@+id/hashcatLogTextView"
-                        android:layout_width="match_parent"
-                        android:layout_height="520dp"
-                        android:layout_marginTop="12dp"
-                        android:background="@drawable/bg_log"
-                        android:padding="12dp" />
-
+                    <Button
+                        android:id="@+id/shareHashcatLogButton"
+                        android:layout_width="0dp"
+                        android:layout_height="46dp"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_button"
+                        android:enabled="false"
+                        android:fontFamily="sans"
+                        android:stateListAnimator="@null"
+                        android:text="@string/share_log"
+                        android:textAllCaps="false"
+                        android:textColor="@color/action_button_text_color"
+                        android:textSize="13sp" />
                 </LinearLayout>
-
             </LinearLayout>
-
         </LinearLayout>
 
     </FrameLayout>

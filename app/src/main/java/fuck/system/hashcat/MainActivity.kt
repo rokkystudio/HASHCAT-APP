@@ -1,7 +1,8 @@
 package fuck.system.hashcat
 
 import android.Manifest
-import android.app.Activity
+import android.app.AlertDialog
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -15,14 +16,24 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.text.Editable
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
 import android.text.TextWatcher
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import fuck.system.hashcat.databinding.ActivityMainBinding
 import java.io.File
 import java.io.OutputStreamWriter
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlin.concurrent.thread
 
 /**
@@ -31,7 +42,7 @@ import kotlin.concurrent.thread
  * clipboard and forwards native Hashcat output to the log screen.
  */
 @Suppress("DEPRECATION")
-class MainActivity : Activity()
+class MainActivity : ComponentActivity()
 {
     private data class HashcatStatus(
         val state: String? = null,
@@ -41,6 +52,11 @@ class MainActivity : Activity()
         val eta: String? = null,
         val speed: String? = null,
         val recovered: String? = null
+    )
+
+    private data class PasswordEntry(
+        val hash: String,
+        val password: String
     )
 
     private enum class HashcatRunState
@@ -65,6 +81,7 @@ class MainActivity : Activity()
     private var hashcatReady: Boolean = false
     @Volatile
     private var hashcatRunState: HashcatRunState = HashcatRunState.IDLE
+    private var hashcatNavigationError: Boolean = false
     private var hashcatStatus: HashcatStatus = HashcatStatus()
     private var hashcatStartedAtRealtime: Long = 0L
     private var candidateSource: String = CANDIDATE_SOURCE_TEMPLATE
@@ -72,9 +89,12 @@ class MainActivity : Activity()
     private var maskCharset: String = DEFAULT_MASK_CHARSET
     private var maskMinLength: Int = DEFAULT_MASK_MIN_LENGTH
     private var maskMaxLength: Int = DEFAULT_MASK_MAX_LENGTH
-    private var selectedMemoryProfile: HashcatRunner.MemoryProfile = HashcatRunner.MemoryProfile.AUTO
+    private var selectedMemoryProfile: HashcatRunner.MemoryProfile = HashcatRunner.MemoryProfile.DISABLED
+    private var selectedWorkloadProfile: HashcatRunner.WorkloadProfile = HashcatRunner.WorkloadProfile.DISABLED
+    private var optimizedKernelEnabled: Boolean = false
     private var hashcatMemoryInfo: String? = null
     private var suppressMaskTextChange: Boolean = false
+    private var suppressCandidateDetailTextChange: Boolean = false
 
     private val hashcatLogLock = Any()
     private val hashcatLogHistory = ArrayDeque<String>()
@@ -127,12 +147,28 @@ class MainActivity : Activity()
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.appVersionTextView.text = "v${BuildConfig.VERSION_NAME}"
         requestNotificationPermission()
 
         hashcatRunner = HashcatRunner(this)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true)
+        {
+            override fun handleOnBackPressed()
+            {
+                if (selectedScreenId != R.id.nav_hashcat)
+                {
+                    binding.bottomNav.selectedItemId = R.id.nav_hashcat
+                    return
+                }
+
+                isEnabled = false
+                onBackPressedDispatcher.onBackPressed()
+            }
+        })
         selectedMemoryProfile = loadMemoryProfile()
         binding.hashModeButton.isEnabled = false
         renderHashcatStatus()
+        renderPasswordEntries()
 
         binding.themeToggleButton.setOnClickListener {
             toggleTheme()
@@ -142,11 +178,28 @@ class MainActivity : Activity()
             toggleLanguage()
         }
 
+        setupBottomNavigationColors()
+        applyButtonIconColors()
+
+        binding.clearHashcatLogButton.setOnClickListener {
+            clearHashcatLog()
+        }
+
+        binding.shareHashcatLogButton.setOnClickListener {
+            shareHashcatLog()
+        }
+
+        binding.clearPasswordsButton.setOnClickListener {
+            savePasswordEntries(emptyList())
+            renderPasswordEntries()
+        }
+
         binding.bottomNav.setOnItemSelectedListener { item ->
             when (item.itemId)
             {
                 R.id.nav_hashcat,
                 R.id.nav_converter,
+                R.id.nav_passwords,
                 R.id.nav_log ->
                 {
                     showScreen(item.itemId)
@@ -169,21 +222,11 @@ class MainActivity : Activity()
             showHashModeDialog()
         }
 
-        binding.candidateSourceRadioGroup.setOnCheckedChangeListener { _, checkedId ->
-            candidateSource = if (checkedId == R.id.candidateWordlistRadioButton)
-            {
-                CANDIDATE_SOURCE_WORDLIST
-            }
-            else
-            {
-                CANDIDATE_SOURCE_TEMPLATE
-            }
-            saveCandidateSettings()
-            renderCandidateSource()
-            updateHashcatStartState()
-        }
-
+        setupCandidateSourceSpinner()
         setupMemoryProfileSpinner()
+        setupWorkloadSpinner()
+        setupOptimizedKernelSwitch()
+        setupTuningInfoButtons()
 
         binding.maskTemplateEditText.addTextChangedListener(object : TextWatcher
         {
@@ -217,6 +260,48 @@ class MainActivity : Activity()
             }
         })
 
+binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatcher
+        {
+            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) = Unit
+
+            override fun afterTextChanged(text: Editable?)
+            {
+                if (!suppressCandidateDetailTextChange)
+                {
+                    maskCharset = text?.toString().orEmpty()
+                    saveCandidateSettings()
+                    updateHashcatStartState()
+                }
+            }
+        })
+
+        binding.candidateLengthValueTextView.addTextChangedListener(object : TextWatcher
+        {
+            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) = Unit
+
+            override fun afterTextChanged(text: Editable?)
+            {
+                if (!suppressCandidateDetailTextChange)
+                {
+                    parseMaskLength(text?.toString().orEmpty())?.let { (minimum, maximum) ->
+                        maskMinLength = minimum
+                        maskMaxLength = maximum
+                        binding.candidateLengthValueTextView.error = null
+                        saveCandidateSettings()
+                        updateHashcatStartState()
+                    }
+                }
+            }
+        })
+        binding.candidateLengthValueTextView.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus && parseMaskLength(binding.candidateLengthValueTextView.text.toString()) == null)
+            {
+                binding.candidateLengthValueTextView.error = getString(R.string.mask_length_invalid)
+            }
+        }
+
         binding.maskAssistantButton.setOnClickListener {
             showMaskAssistant()
         }
@@ -239,8 +324,16 @@ class MainActivity : Activity()
             openDocument(REQUEST_OPEN_CAPTURE)
         }
 
+        binding.pasteCaptureButton.setOnClickListener {
+            pasteCaptureFromClipboard()
+        }
+
         binding.convertButton.setOnClickListener {
-            startConversion()
+            val captureUri = selectedCaptureUri
+            if (captureUri != null && pendingConversion != null)
+            {
+                createOutputDocument(captureUri)
+            }
         }
 
         restorePersistentHashcatState()
@@ -248,6 +341,8 @@ class MainActivity : Activity()
         renderHeaderControls()
         renderCandidateSource()
         renderMemoryProfile()
+        renderWorkloadProfile()
+        renderOptimizedKernel()
         renderHashcatMemoryInfo()
         showScreen(selectedScreenId)
         binding.bottomNav.selectedItemId = selectedScreenId
@@ -280,20 +375,6 @@ class MainActivity : Activity()
         outState.putString(STATE_MEMORY_PROFILE, selectedMemoryProfile.name)
     }
 
-    /**
-     * Returns from secondary screens to the main Hashcat screen before
-     * delegating the system Back action to Android.
-     */
-    override fun onBackPressed()
-    {
-        if (selectedScreenId != R.id.nav_hashcat)
-        {
-            binding.bottomNav.selectedItemId = R.id.nav_hashcat
-            return
-        }
-
-        super.onBackPressed()
-    }
 
     /**
      * Stops a native Hashcat process when this Activity is destroyed.
@@ -313,6 +394,7 @@ class MainActivity : Activity()
      * Receives Storage Access Framework results for capture selection, hc22000
      * output creation, Hashcat input selection and wordlist selection.
      */
+    @Deprecated("Android framework callback required by the existing request-code flow")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?)
     {
         super.onActivityResult(requestCode, resultCode, data)
@@ -423,9 +505,84 @@ class MainActivity : Activity()
         }
     }
 
+    private fun applyButtonIconColors()
+    {
+        val iconColor = resources.getColor(R.color.button_icon, this.theme)
+        val tint = android.content.res.ColorStateList.valueOf(iconColor)
+
+        binding.maskAssistantButton.imageTintList = tint
+        binding.hashModeIconImageView.imageTintList = tint
+    }
+
+    private fun setupBottomNavigationColors()
+    {
+        binding.bottomNav.itemIconTintList = null
+        binding.bottomNav.itemTextColor = null
+        updateBottomNavigationColors()
+    }
+
+    private fun updateBottomNavigationColors()
+    {
+        val activeColor = resources.getColor(R.color.navigation_icon_active, theme)
+        val inactiveColor = resources.getColor(R.color.navigation_icon_inactive, theme)
+
+        tintNavigationIcon(
+            R.id.nav_converter,
+            if (selectedScreenId == R.id.nav_converter) activeColor else inactiveColor
+        )
+        tintNavigationIcon(
+            R.id.nav_passwords,
+            if (selectedScreenId == R.id.nav_passwords) activeColor else inactiveColor
+        )
+        tintNavigationIcon(
+            R.id.nav_log,
+            if (selectedScreenId == R.id.nav_log) activeColor else inactiveColor
+        )
+        updateHashcatNavigationColor(activeColor, inactiveColor)
+    }
+
+    private fun updateHashcatNavigationColor(
+        activeColor: Int = resources.getColor(R.color.navigation_icon_active, theme),
+        inactiveColor: Int = resources.getColor(R.color.navigation_icon_inactive, theme)
+    )
+    {
+        val running = hashcatRunState == HashcatRunState.STARTING ||
+            hashcatRunState == HashcatRunState.RUNNING ||
+            hashcatRunState == HashcatRunState.STOPPING
+        val color = when
+        {
+            hashcatNavigationError -> resources.getColor(R.color.navigation_hashcat_error, theme)
+            running -> resources.getColor(R.color.navigation_hashcat_running, theme)
+            selectedScreenId == R.id.nav_hashcat -> activeColor
+            else -> inactiveColor
+        }
+
+        tintNavigationIcon(R.id.nav_hashcat, color)
+
+        val item = binding.bottomNav.menu.findItem(R.id.nav_hashcat) ?: return
+        item.title = if (hashcatNavigationError || running)
+        {
+            SpannableString(getString(R.string.nav_hashcat)).apply {
+                setSpan(ForegroundColorSpan(color), 0, length, 0)
+            }
+        }
+        else
+        {
+            getString(R.string.nav_hashcat)
+        }
+    }
+
+    private fun tintNavigationIcon(itemId: Int, color: Int)
+    {
+        val item = binding.bottomNav.menu.findItem(itemId) ?: return
+        val icon = item.icon?.mutate() ?: return
+        icon.setTintList(android.content.res.ColorStateList.valueOf(color))
+        item.icon = icon
+    }
     private fun showScreen(itemId: Int)
     {
         selectedScreenId = itemId
+        updateBottomNavigationColors()
         binding.hashcatScreen.visibility = if (itemId == R.id.nav_hashcat)
         {
             View.VISIBLE
@@ -436,6 +593,15 @@ class MainActivity : Activity()
         }
         binding.converterScreen.visibility = if (itemId == R.id.nav_converter)
         {
+            View.VISIBLE
+        }
+        else
+        {
+            View.GONE
+        }
+        binding.passwordsScreen.visibility = if (itemId == R.id.nav_passwords)
+        {
+            renderPasswordEntries()
             View.VISIBLE
         }
         else
@@ -503,7 +669,7 @@ class MainActivity : Activity()
                 R.string.selected_file,
                 queryDisplayName(uri)
             )
-            binding.convertButton.isEnabled = true
+            validateCaptureUri(uri, showToastOnFailure = false)
             describePcapUri(uri)
         }
 
@@ -568,6 +734,10 @@ class MainActivity : Activity()
         selectedMemoryProfile = parseMemoryProfile(
             preferences.getString(PREFERENCE_MEMORY_PROFILE, null)
         )
+        selectedWorkloadProfile = parseWorkloadProfile(
+            preferences.getString(PREFERENCE_WORKLOAD_PROFILE, null)
+        )
+        optimizedKernelEnabled = preferences.getBoolean(PREFERENCE_OPTIMIZED_KERNEL, false)
 
         restorePersistentWordlist(preferences)
     }
@@ -656,39 +826,196 @@ class MainActivity : Activity()
         startActivityForResult(intent, requestCode)
     }
 
+    private fun readClipboardText(errorMessageRes: Int): String?
+    {
+        val clipboard = getSystemService(ClipboardManager::class.java) ?: return null
+        val text = clipboard.primaryClip
+            ?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)
+            ?.text
+            ?.toString()
+            ?.takeIf(String::isNotEmpty)
+
+        if (text == null)
+        {
+            Toast.makeText(this, errorMessageRes, Toast.LENGTH_SHORT).show()
+        }
+
+        return text
+    }
+
+    private fun writeClipboardCandidate(
+        directoryName: String,
+        fileName: String,
+        bytes: ByteArray
+    ): File
+    {
+        val directory = File(cacheDir, directoryName).apply {
+            mkdirs()
+        }
+        return File(directory, fileName).apply {
+            writeBytes(bytes)
+        }
+    }
+
     private fun pasteHashesFromClipboard()
     {
-        val clipboard = getSystemService(ClipboardManager::class.java) ?: return
-        val text = clipboard.primaryClip
-            ?.getItemAt(0)
-            ?.coerceToText(this)
-            ?.toString()
-            ?.trim()
-            .orEmpty()
-
+        val text = readClipboardText(R.string.clipboard_empty)?.trim().orEmpty()
         if (text.isEmpty())
         {
-            appendHashcatLog(getString(R.string.clipboard_empty))
             return
         }
 
-        val inputDirectory = File(cacheDir, "hashcat-input").apply {
-            mkdirs()
-        }
-        val clipboardFile = File(inputDirectory, "clipboard-hashes.txt")
-        clipboardFile.writeText(text, Charsets.UTF_8)
+        val candidate = writeClipboardCandidate(
+            directoryName = "hashcat-input",
+            fileName = "clipboard-hashes.txt",
+            bytes = text.toByteArray(Charsets.UTF_8)
+        )
 
+        if (!candidate.isFile || candidate.length() == 0L)
+        {
+            Toast.makeText(this, R.string.clipboard_empty, Toast.LENGTH_SHORT).show()
+            candidate.delete()
+            return
+        }
+
+        selectedHashClipboardFile?.takeIf { it != candidate }?.delete()
         selectedHashUri = null
-        selectedHashClipboardFile = clipboardFile
+        selectedHashClipboardFile = candidate
         binding.hashFileTextView.text = getString(
             R.string.clipboard_hashes_selected,
             text.length
         )
-        describeHashFile(clipboardFile)
+        describeHashFile(candidate)
         appendHashcatLog(getString(R.string.clipboard_loaded))
         updateHashcatStartState()
     }
 
+    private fun pasteCaptureFromClipboard()
+    {
+        val text = readClipboardText(R.string.capture_clipboard_requires_text) ?: return
+        val candidate = writeClipboardCandidate(
+            directoryName = "capture-clipboard",
+            fileName = "clipboard-input.cap",
+            bytes = text.toByteArray(Charsets.ISO_8859_1)
+        )
+
+        validateClipboardCapture(candidate)
+    }
+
+    private fun validateClipboardCapture(candidate: File)
+    {
+        binding.convertButton.isEnabled = false
+
+        thread(name = "capture-clipboard-validator") {
+            try
+            {
+                val result = candidate.inputStream().use { input ->
+                    CapToHc22000Converter().convert(input)
+                }
+
+                if (result.lines.isEmpty())
+                {
+                    error(getString(R.string.error_capture_no_hc22000))
+                }
+
+                runOnUiThread {
+                    selectedCaptureUri = Uri.fromFile(candidate)
+                    pendingConversion = result
+                    binding.selectedFileTextView.text = getString(R.string.clipboard_capture_selected)
+                    binding.pcapInfoTextView.text = getString(
+                        R.string.status_capture_ready,
+                        result.lines.size
+                    )
+                    binding.statusTextView.text = getString(
+                        R.string.status_capture_ready,
+                        result.lines.size
+                    )
+                    binding.convertButton.isEnabled = true
+                }
+            }
+            catch (error: Throwable)
+            {
+                candidate.delete()
+                runOnUiThread {
+                    Toast.makeText(
+                        this,
+                        error.message ?: getString(R.string.status_capture_invalid),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun selectCaptureUri(uri: Uri, fromClipboard: Boolean = false)
+    {
+        selectedCaptureUri = uri
+        pendingConversion = null
+        binding.selectedFileTextView.text = getString(
+            R.string.selected_file,
+            queryDisplayName(uri)
+        )
+        binding.convertButton.isEnabled = false
+        validateCaptureUri(uri, showToastOnFailure = fromClipboard)
+        describePcapUri(uri)
+    }
+
+    private fun validateCaptureUri(uri: Uri, showToastOnFailure: Boolean)
+    {
+        binding.convertButton.isEnabled = false
+        binding.statusTextView.text = getString(R.string.status_validating_capture)
+
+        thread(name = "capture-validator") {
+            try
+            {
+                val result = contentResolver.openInputStream(uri)?.use { input ->
+                    CapToHc22000Converter().convert(input)
+                } ?: error(getString(R.string.error_open_capture))
+
+                if (result.lines.isEmpty())
+                {
+                    error(getString(R.string.error_capture_no_hc22000))
+                }
+
+                runOnUiThread {
+                    if (selectedCaptureUri != uri)
+                    {
+                        return@runOnUiThread
+                    }
+
+                    pendingConversion = result
+                    binding.convertButton.isEnabled = true
+                    binding.statusTextView.text = getString(
+                        R.string.status_capture_ready,
+                        result.lines.size
+                    )
+                }
+            }
+            catch (error: Throwable)
+            {
+                runOnUiThread {
+                    if (selectedCaptureUri != uri)
+                    {
+                        return@runOnUiThread
+                    }
+
+                    pendingConversion = null
+                    binding.convertButton.isEnabled = false
+                    binding.statusTextView.text = getString(R.string.status_capture_invalid)
+
+                    if (showToastOnFailure)
+                    {
+                        Toast.makeText(
+                            this,
+                            error.message ?: getString(R.string.status_capture_invalid),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }
+        }
+    }
     private fun handleCaptureSelection(resultCode: Int, data: Intent?)
     {
         if (resultCode != RESULT_OK)
@@ -698,17 +1025,7 @@ class MainActivity : Activity()
 
         val uri = data?.data ?: return
         persistReadPermission(uri)
-
-        selectedCaptureUri = uri
-        pendingConversion = null
-
-        binding.selectedFileTextView.text = getString(
-            R.string.selected_file,
-            queryDisplayName(uri)
-        )
-        binding.convertButton.isEnabled = true
-        binding.statusTextView.text = getString(R.string.status_ready)
-        describePcapUri(uri)
+        selectCaptureUri(uri)
     }
 
     private fun handleOutputSelection(resultCode: Int, data: Intent?)
@@ -779,52 +1096,6 @@ class MainActivity : Activity()
         }
         catch (_: SecurityException)
         {
-        }
-    }
-
-    private fun startConversion()
-    {
-        val captureUri = selectedCaptureUri ?: return
-
-        setConverterBusy(true)
-        binding.statusTextView.text = getString(R.string.status_converting)
-
-        thread(name = "cap-converter") {
-            try
-            {
-                val result = contentResolver.openInputStream(captureUri)?.use { input ->
-                    CapToHc22000Converter().convert(input)
-                } ?: error(getString(R.string.error_open_capture))
-
-                pendingConversion = result
-
-                runOnUiThread {
-                    setConverterBusy(false)
-
-                    binding.statusTextView.text = getString(
-                        R.string.status_conversion_result,
-                        result.matchedPairCount,
-                        result.lines.size,
-                        result.skippedWithoutSsidCount,
-                        result.packetCount
-                    )
-
-                    if (result.lines.isNotEmpty())
-                    {
-                        createOutputDocument(captureUri)
-                    }
-                }
-            }
-            catch (error: Exception)
-            {
-                runOnUiThread {
-                    setConverterBusy(false)
-                    binding.statusTextView.text = getString(
-                        R.string.status_error,
-                        error.message ?: error.javaClass.simpleName
-                    )
-                }
-            }
         }
     }
 
@@ -1002,16 +1273,17 @@ class MainActivity : Activity()
     {
         val useTemplate = candidateSource == CANDIDATE_SOURCE_TEMPLATE
 
-        binding.candidateTemplateRadioButton.isChecked = useTemplate
-        binding.candidateWordlistRadioButton.isChecked = !useTemplate
+        binding.candidateSourceSpinner.setSelection(if (useTemplate) 0 else 1, false)
         binding.maskTemplateLabelTextView.visibility = if (useTemplate) View.VISIBLE else View.GONE
         binding.maskTemplateRow.visibility = if (useTemplate) View.VISIBLE else View.GONE
-        binding.candidateTemplateInfoTextView.visibility = if (useTemplate) View.VISIBLE else View.GONE
+        binding.candidateTemplateDetailsRow.visibility = if (useTemplate) View.VISIBLE else View.GONE
         binding.wordlistFileTextView.visibility = if (useTemplate) View.GONE else View.VISIBLE
         binding.wordlistFileInfoTextView.visibility = if (useTemplate) View.GONE else View.VISIBLE
         binding.selectWordlistButton.visibility = if (useTemplate) View.GONE else View.VISIBLE
         binding.maskTemplateEditText.isEnabled = useTemplate && !hashcatRunner.isRunning()
         binding.maskAssistantButton.isEnabled = useTemplate && !hashcatRunner.isRunning()
+        binding.candidateCharsetValueTextView.isEnabled = useTemplate && !hashcatRunner.isRunning()
+        binding.candidateLengthValueTextView.isEnabled = useTemplate && !hashcatRunner.isRunning()
         binding.selectWordlistButton.isEnabled = !useTemplate && !hashcatRunner.isRunning()
 
         if (binding.maskTemplateEditText.text.toString() != maskTemplate)
@@ -1026,113 +1298,243 @@ class MainActivity : Activity()
 
     private fun renderCandidateInfo()
     {
-        binding.candidateTemplateInfoTextView.text = getString(
-            R.string.mask_template_info,
-            maskTemplate.ifBlank { getString(R.string.hashcat_status_unknown) },
-            maskCharset.ifBlank { getString(R.string.hashcat_status_unknown) },
-            maskMinLength,
-            maskMaxLength
-        )
-    }
+        suppressCandidateDetailTextChange = true
 
-    private fun setupMemoryProfileSpinner()
-    {
-        val adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            memoryProfileLabels()
-        ).apply {
-            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        if (binding.candidateCharsetValueTextView.text.toString() != maskCharset)
+        {
+            binding.candidateCharsetValueTextView.setText(maskCharset)
         }
 
-        binding.memoryProfileSpinner.adapter = adapter
-        binding.memoryProfileSpinner.onItemSelectedListener =
-            object : AdapterView.OnItemSelectedListener
-            {
-                override fun onItemSelected(
-                    parent: AdapterView<*>?,
-                    view: View?,
-                    position: Int,
-                    id: Long
-                )
-                {
-                    val memoryProfile = memoryProfileAt(position)
+        val length = if (maskMinLength == maskMaxLength)
+        {
+            maskMinLength.toString()
+        }
+        else
+        {
+            getString(R.string.mask_length_range, maskMinLength, maskMaxLength)
+        }
+        if (binding.candidateLengthValueTextView.text.toString() != length)
+        {
+            binding.candidateLengthValueTextView.setText(length)
+        }
+        binding.candidateLengthValueTextView.error = null
 
-                    if (memoryProfile != selectedMemoryProfile)
-                    {
-                        selectedMemoryProfile = memoryProfile
-                        saveMemoryProfile(selectedMemoryProfile)
-                    }
+        suppressCandidateDetailTextChange = false
+    }
+
+    private fun parseMaskLength(value: String): Pair<Int, Int>?
+    {
+        val match = Regex("^(\\d+)(?:\\s*[-–]\\s*(\\d+))?$").matchEntire(value.trim()) ?: return null
+        val minimum = match.groupValues[1].toIntOrNull() ?: return null
+        val maximum = match.groupValues[2].takeIf(String::isNotEmpty)?.toIntOrNull() ?: minimum
+
+        if (minimum <= 0 || maximum < minimum)
+        {
+            return null
+        }
+
+        return minimum to maximum
+    }
+
+    private fun setupCandidateSourceSpinner()
+    {
+        binding.candidateSourceSpinner.adapter = spinnerAdapter(
+            listOf(
+                getString(R.string.candidate_template),
+                getString(R.string.candidate_wordlist)
+            )
+        )
+        binding.candidateSourceSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener
+        {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long)
+            {
+                val source = if (position == 1)
+                {
+                    CANDIDATE_SOURCE_WORDLIST
+                }
+                else
+                {
+                    CANDIDATE_SOURCE_TEMPLATE
                 }
 
-                override fun onNothingSelected(parent: AdapterView<*>?)
+                if (source != candidateSource)
                 {
+                    candidateSource = source
+                    saveCandidateSettings()
+                    renderCandidateSource()
+                    updateHashcatStartState()
                 }
             }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+    private fun setupMemoryProfileSpinner()
+    {
+        binding.memoryProfileSpinner.adapter = spinnerAdapter(memoryProfileLabels())
+        binding.memoryProfileSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener
+        {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long)
+            {
+                val profile = HashcatRunner.MemoryProfile.values().getOrElse(position) {
+                    HashcatRunner.MemoryProfile.DISABLED
+                }
+                if (profile != selectedMemoryProfile)
+                {
+                    selectedMemoryProfile = profile
+                    saveTuningSettings()
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+
+    private fun setupWorkloadSpinner()
+    {
+        binding.workloadSpinner.adapter = spinnerAdapter(workloadLabels())
+        binding.workloadSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener
+        {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long)
+            {
+                val profile = HashcatRunner.WorkloadProfile.values().getOrElse(position) {
+                    HashcatRunner.WorkloadProfile.DISABLED
+                }
+                if (profile != selectedWorkloadProfile)
+                {
+                    selectedWorkloadProfile = profile
+                    saveTuningSettings()
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+
+    private fun setupOptimizedKernelSwitch()
+    {
+        binding.optimizedKernelSwitch.setOnCheckedChangeListener { _, checked ->
+            if (checked != optimizedKernelEnabled)
+            {
+                optimizedKernelEnabled = checked
+                saveTuningSettings()
+            }
+        }
+    }
+
+    private fun setupTuningInfoButtons()
+    {
+        binding.captureSelectionInfoButton.setOnClickListener {
+            showTuningInfo(R.string.capture_selection_title, R.string.capture_selection_info)
+        }
+        binding.hashModeInfoButton.setOnClickListener {
+            showTuningInfo(R.string.hash_mode_label, R.string.hash_mode_info)
+        }
+        binding.hashFileInfoButton.setOnClickListener {
+            showTuningInfo(R.string.hash_file_panel_title, R.string.hash_file_panel_info)
+        }
+        binding.candidateInfoButton.setOnClickListener {
+            showTuningInfo(R.string.candidate_panel_title, R.string.candidate_panel_info)
+        }
+        binding.memoryInfoButton.setOnClickListener {
+            showTuningInfo(R.string.memory_profile_title, R.string.memory_info_details)
+        }
+        binding.workloadInfoButton.setOnClickListener {
+            showTuningInfo(R.string.workload_title, R.string.workload_info_details)
+        }
+        binding.optimizedKernelInfoButton.setOnClickListener {
+            showTuningInfo(R.string.optimized_kernel_title, R.string.optimized_kernel_info_details)
+        }
+    }
+
+    private fun showTuningInfo(title: Int, message: Int)
+    {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun spinnerAdapter(values: List<String>): ArrayAdapter<String>
+    {
+        return ArrayAdapter(this, android.R.layout.simple_spinner_item, values).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
     }
 
     private fun renderMemoryProfile()
     {
-        binding.memoryProfileSpinner.setSelection(
-            memoryProfileIndex(selectedMemoryProfile),
-            false
-        )
+        binding.memoryProfileSpinner.setSelection(selectedMemoryProfile.ordinal, false)
+    }
+
+    private fun renderWorkloadProfile()
+    {
+        binding.workloadSpinner.setSelection(selectedWorkloadProfile.ordinal, false)
+    }
+
+    private fun renderOptimizedKernel()
+    {
+        binding.optimizedKernelSwitch.isChecked = optimizedKernelEnabled
     }
 
     private fun memoryProfileLabels(): List<String>
     {
         return listOf(
-            getString(R.string.memory_profile_auto),
-            getString(R.string.memory_profile_low),
-            getString(R.string.memory_profile_balanced),
-            getString(R.string.memory_profile_high)
+            getString(R.string.option_disabled),
+            getString(R.string.memory_512),
+            getString(R.string.memory_768),
+            getString(R.string.memory_1024),
+            getString(R.string.memory_1280),
+            getString(R.string.memory_1536)
         )
     }
 
-    private fun memoryProfileAt(position: Int): HashcatRunner.MemoryProfile
+    private fun workloadLabels(): List<String>
     {
-        return when (position)
-        {
-            1 -> HashcatRunner.MemoryProfile.LOW
-            2 -> HashcatRunner.MemoryProfile.BALANCED
-            3 -> HashcatRunner.MemoryProfile.HIGH
-            else -> HashcatRunner.MemoryProfile.AUTO
-        }
-    }
-
-    private fun memoryProfileIndex(memoryProfile: HashcatRunner.MemoryProfile): Int
-    {
-        return when (memoryProfile)
-        {
-            HashcatRunner.MemoryProfile.AUTO -> 0
-            HashcatRunner.MemoryProfile.LOW -> 1
-            HashcatRunner.MemoryProfile.BALANCED -> 2
-            HashcatRunner.MemoryProfile.HIGH -> 3
-        }
+        return listOf(
+            getString(R.string.workload_disabled),
+            getString(R.string.workload_1),
+            getString(R.string.workload_2),
+            getString(R.string.workload_3),
+            getString(R.string.workload_4)
+        )
     }
 
     private fun loadMemoryProfile(): HashcatRunner.MemoryProfile
     {
         val preferences = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-
         return parseMemoryProfile(preferences.getString(PREFERENCE_MEMORY_PROFILE, null))
     }
 
-    private fun saveMemoryProfile(memoryProfile: HashcatRunner.MemoryProfile)
+    private fun saveTuningSettings()
     {
         getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
             .edit()
-            .putString(PREFERENCE_MEMORY_PROFILE, memoryProfile.name)
+            .putString(PREFERENCE_MEMORY_PROFILE, selectedMemoryProfile.name)
+            .putString(PREFERENCE_WORKLOAD_PROFILE, selectedWorkloadProfile.name)
+            .putBoolean(PREFERENCE_OPTIMIZED_KERNEL, optimizedKernelEnabled)
             .apply()
     }
 
     private fun parseMemoryProfile(value: String?): HashcatRunner.MemoryProfile
     {
-        return HashcatRunner.MemoryProfile.values().firstOrNull { memoryProfile ->
-            memoryProfile.name == value
-        } ?: HashcatRunner.MemoryProfile.AUTO
+        return when (value)
+        {
+            "LOW" -> HashcatRunner.MemoryProfile.MB_768
+            "BALANCED" -> HashcatRunner.MemoryProfile.MB_1024
+            "HIGH" -> HashcatRunner.MemoryProfile.MB_1280
+            "AUTO", null -> HashcatRunner.MemoryProfile.DISABLED
+            else -> HashcatRunner.MemoryProfile.values().firstOrNull { it.name == value }
+                ?: HashcatRunner.MemoryProfile.DISABLED
+        }
     }
 
+    private fun parseWorkloadProfile(value: String?): HashcatRunner.WorkloadProfile
+    {
+        return HashcatRunner.WorkloadProfile.values().firstOrNull { it.name == value }
+            ?: HashcatRunner.WorkloadProfile.DISABLED
+    }
     private fun requestHashcatStop(reason: String)
     {
         if (hashcatRunState == HashcatRunState.STOPPING || hashcatRunState == HashcatRunState.IDLE)
@@ -1154,6 +1556,7 @@ class MainActivity : Activity()
     private fun finishHashcatStop()
     {
         hashcatRunState = HashcatRunState.IDLE
+        hashcatNavigationError = false
         stopHashcatForegroundService()
         setHashcatBusy(false)
         hashcatStatus = hashcatStatus.copy(
@@ -1191,12 +1594,9 @@ class MainActivity : Activity()
         val clipboardHashFile = selectedHashClipboardFile
         val hashMode = selectedHashMode
 
-        if (hashUri == null && clipboardHashFile == null)
-        {
-            return
-        }
 
         hashcatRunState = HashcatRunState.STARTING
+        hashcatNavigationError = false
         hashcatMemoryInfo = null
         renderHashcatMemoryInfo()
         clearHashcatLog()
@@ -1258,13 +1658,16 @@ class MainActivity : Activity()
                     hashMode = hashMode,
                     recoveredFile = recoveredFile,
                     memoryProfile = selectedMemoryProfile,
-                    listener = createHashcatListener(recoveredFile)
+                    workloadProfile = selectedWorkloadProfile,
+                    optimizedKernel = optimizedKernelEnabled,
+                    listener = createHashcatListener(recoveredFile, hashFile)
                 )
             }
             catch (error: Throwable)
             {
                 runOnUiThread {
                     hashcatRunState = HashcatRunState.IDLE
+                    hashcatNavigationError = true
                     stopHashcatForegroundService()
                     setHashcatBusy(false)
                     hashcatStatus = hashcatStatus.copy(
@@ -1291,22 +1694,31 @@ class MainActivity : Activity()
         inputDirectory: File
     ): File
     {
-        clipboardHashFile?.takeIf(File::isFile)?.let { file ->
-            return file
+        val clipboardFile = clipboardHashFile?.takeIf(File::isFile)
+        val sample = if (clipboardFile != null)
+        {
+            clipboardFile.inputStream().use { input ->
+                readLimitedBytes(input, MAX_SAMPLE_BYTES)
+            }
+        }
+        else
+        {
+            val uri = hashUri
+                ?: error(getString(R.string.error_open_selected_file, "hash"))
+            readSampleBytes(uri)
         }
 
-        val uri = hashUri
-            ?: error(getString(R.string.error_open_selected_file, "hash"))
-        val sample = readSampleBytes(uri)
-        val isCapture = sample.startsWith(0xD4, 0xC3, 0xB2, 0xA1) ||
-            sample.startsWith(0xA1, 0xB2, 0xC3, 0xD4) ||
-            sample.startsWith(0x4D, 0x3C, 0xB2, 0xA1) ||
-            sample.startsWith(0xA1, 0xB2, 0x3C, 0x4D) ||
-            sample.startsWith(0x0A, 0x0D, 0x0D, 0x0A)
-
-        if (!isCapture)
+        if (!isCaptureSample(sample))
         {
-            return copyUriToFile(uri, File(inputDirectory, "hashes.input"))
+            if (clipboardFile != null)
+            {
+                return clipboardFile
+            }
+
+            return copyUriToFile(
+                hashUri ?: error(getString(R.string.error_open_selected_file, "hash")),
+                File(inputDirectory, "hashes.input")
+            )
         }
 
         if (hashMode != WPA_HASH_MODE)
@@ -1314,9 +1726,20 @@ class MainActivity : Activity()
             error(getString(R.string.error_capture_requires_mode_22000))
         }
 
-        val result = contentResolver.openInputStream(uri)?.use { input ->
-            CapToHc22000Converter().convert(input)
-        } ?: error(getString(R.string.error_open_capture))
+        val result = if (clipboardFile != null)
+        {
+            clipboardFile.inputStream().use { input ->
+                CapToHc22000Converter().convert(input)
+            }
+        }
+        else
+        {
+            val uri = hashUri
+                ?: error(getString(R.string.error_open_selected_file, "hash"))
+            contentResolver.openInputStream(uri)?.use { input ->
+                CapToHc22000Converter().convert(input)
+            } ?: error(getString(R.string.error_open_capture))
+        }
 
         if (result.lines.isEmpty())
         {
@@ -1333,7 +1756,16 @@ class MainActivity : Activity()
         }
     }
 
-    private fun createHashcatListener(recoveredFile: File): HashcatRunner.Listener
+    private fun isCaptureSample(sample: ByteArray): Boolean
+    {
+        return sample.startsWith(0xD4, 0xC3, 0xB2, 0xA1) ||
+            sample.startsWith(0xA1, 0xB2, 0xC3, 0xD4) ||
+            sample.startsWith(0x4D, 0x3C, 0xB2, 0xA1) ||
+            sample.startsWith(0xA1, 0xB2, 0x3C, 0x4D) ||
+            sample.startsWith(0x0A, 0x0D, 0x0D, 0x0A)
+    }
+
+    private fun createHashcatListener(recoveredFile: File, hashFile: File): HashcatRunner.Listener
     {
         return object : HashcatRunner.Listener
         {
@@ -1392,6 +1824,7 @@ class MainActivity : Activity()
             {
                 runOnUiThread {
                     hashcatRunState = HashcatRunState.IDLE
+                    hashcatNavigationError = false
                     stopHashcatForegroundService()
                     setHashcatBusy(false)
                     hashcatStatus = hashcatStatus.copy(
@@ -1401,14 +1834,23 @@ class MainActivity : Activity()
                     appendHashcatLog(
                         getString(R.string.hashcat_finished, exitCode)
                     )
-                    if (exitCode == 0 && recoveredFile.isFile && recoveredFile.length() > 0L)
+                    if (recoveredFile.isFile && recoveredFile.length() > 0L)
                     {
-                        appendHashcatLog(
-                            getString(
-                                R.string.hashcat_result_saved,
-                                recoveredFile.absolutePath
+                        val recoveredResult = recoveredFile.readText(Charsets.UTF_8).trim()
+
+                        if (recoveredResult.isNotEmpty())
+                        {
+                            saveRecoveredPasswordEntries(recoveredResult, hashFile)
+                                                renderPasswordEntries()
+        renderPasswordEntries()
+                            appendHashcatLog(getString(R.string.hashcat_result_found, recoveredResult))
+                            appendHashcatLog(
+                                getString(
+                                    R.string.hashcat_result_saved,
+                                    recoveredFile.absolutePath
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
@@ -1417,6 +1859,7 @@ class MainActivity : Activity()
             {
                 runOnUiThread {
                     hashcatRunState = HashcatRunState.IDLE
+                    hashcatNavigationError = true
                     stopHashcatForegroundService()
                     setHashcatBusy(false)
                     hashcatStatus = hashcatStatus.copy(
@@ -1496,6 +1939,19 @@ class MainActivity : Activity()
         return true
     }
 
+    private fun parseHashcatProgress(value: String): Double?
+    {
+        val match = Regex("^([0-9,]+)\\s*/\\s*([0-9,]+)").find(value) ?: return null
+        val current = match.groupValues[1].replace(",", "").toDoubleOrNull() ?: return null
+        val total = match.groupValues[2].replace(",", "").toDoubleOrNull() ?: return null
+
+        if (total <= 0.0)
+        {
+            return null
+        }
+
+        return ((current / total) * 100.0).coerceIn(0.0, 100.0)
+    }
     private fun extractParenthesizedTail(value: String): String?
     {
         val start = value.lastIndexOf('(')
@@ -1511,6 +1967,147 @@ class MainActivity : Activity()
         }
     }
 
+    private fun loadPasswordEntries(): List<PasswordEntry>
+    {
+        val raw = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .getString(PREFERENCE_PASSWORD_ENTRIES, null)
+            ?: return emptyList()
+
+        return try
+        {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length())
+                {
+                    val item = array.getJSONObject(index)
+                    val hash = item.optString("hash")
+                    val password = item.optString("password")
+                    if (hash.isNotBlank()) add(PasswordEntry(hash, password))
+                }
+            }
+        }
+        catch (_: Throwable)
+        {
+            emptyList()
+        }
+    }
+
+    private fun savePasswordEntries(entries: List<PasswordEntry>)
+    {
+        val array = JSONArray()
+        entries.forEach { entry ->
+            array.put(JSONObject().apply {
+                put("hash", entry.hash)
+                put("password", entry.password)
+            })
+        }
+        getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(PREFERENCE_PASSWORD_ENTRIES, array.toString())
+            .apply()
+    }
+
+    private fun saveRecoveredPasswordEntries(recoveredResult: String, hashFile: File)
+    {
+        val sourceHashes = hashFile.readLines(Charsets.UTF_8)
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .sortedByDescending(String::length)
+        val found = recoveredResult.lineSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .mapNotNull { line ->
+                val hash = sourceHashes.firstOrNull { source ->
+                    line.startsWith("$source:")
+                } ?: return@mapNotNull null
+                PasswordEntry(hash, line.substring(hash.length + 1))
+            }
+            .toList()
+
+        if (found.isEmpty()) return
+
+        val entries = loadPasswordEntries().toMutableList()
+        found.asReversed().forEach { entry ->
+            entries.removeAll { existing -> existing.hash == entry.hash }
+            entries.add(0, entry)
+        }
+        savePasswordEntries(entries)
+    }
+
+    private fun renderPasswordEntries()
+    {
+        val entries = loadPasswordEntries()
+        binding.passwordsListContainer.removeAllViews()
+        binding.passwordsEmptyTextView.visibility = if (entries.isEmpty()) View.VISIBLE else View.GONE
+        binding.clearPasswordsButton.isEnabled = entries.isNotEmpty()
+
+        entries.forEach { entry ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                setBackgroundResource(R.drawable.bg_log)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(8) }
+            }
+            card.addView(TextView(this).apply {
+                text = getString(R.string.password_hash_label) + ":\n" + entry.hash
+                setTextColor(resources.getColor(R.color.text_primary, theme))
+                textSize = 12f
+                setTextIsSelectable(true)
+            })
+            card.addView(TextView(this).apply {
+                text = getString(R.string.password_value_label) + ":\n" + entry.password
+                setTextColor(resources.getColor(R.color.text_primary, theme))
+                textSize = 13f
+                typeface = android.graphics.Typeface.MONOSPACE
+                setTextIsSelectable(true)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(8) }
+            })
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(10) }
+            }
+            actions.addView(Button(this).apply {
+                text = getString(R.string.copy_password)
+                isAllCaps = false
+                setBackgroundResource(R.drawable.bg_button)
+                stateListAnimator = null
+                setTextColor(resources.getColor(R.color.text_primary, theme))
+                layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
+                setOnClickListener {
+                    getSystemService(ClipboardManager::class.java)?.setPrimaryClip(
+                        ClipData.newPlainText(getString(R.string.password_value_label), entry.password)
+                    )
+                    Toast.makeText(this@MainActivity, R.string.password_copied, Toast.LENGTH_SHORT).show()
+                }
+            })
+            actions.addView(Button(this).apply {
+                text = getString(R.string.delete_password)
+                isAllCaps = false
+                setBackgroundResource(R.drawable.bg_button)
+                stateListAnimator = null
+                setTextColor(resources.getColor(R.color.text_primary, theme))
+                layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(8) }
+                setOnClickListener {
+                    savePasswordEntries(loadPasswordEntries().filterNot { saved -> saved.hash == entry.hash })
+                    renderPasswordEntries()
+                }
+            })
+            card.addView(actions)
+            binding.passwordsListContainer.addView(card)
+        }
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
     private fun renderHashcatStatus()
     {
         val fallback = getString(R.string.hashcat_status_unknown)
@@ -1522,6 +2119,18 @@ class MainActivity : Activity()
         {
             fallback
         }
+
+        updateBottomNavigationColors()
+
+        val progressPercent = hashcatStatus.progress
+            ?.let(::parseHashcatProgress)
+            ?: 0.0
+        binding.hashcatProgressBar.progress = (progressPercent * 100.0).toInt()
+        binding.hashcatProgressPercentTextView.text = String.format(
+            Locale.ROOT,
+            "%.2f %%",
+            progressPercent
+        )
 
         binding.hashcatStatusTextView.text = getString(
             R.string.hashcat_status_format,
@@ -1582,6 +2191,7 @@ class MainActivity : Activity()
         }
 
         binding.hashcatLogTextView.setLogText("")
+        binding.shareHashcatLogButton.isEnabled = false
     }
 
     /**
@@ -1590,6 +2200,52 @@ class MainActivity : Activity()
      * updated in place by field name. This avoids growing the TextView every
      * second and preserves the user's scroll position while they inspect history.
      */
+    private fun buildHashcatLogText(): String
+    {
+        synchronized(hashcatLogLock)
+        {
+            val estimatedChars = hashcatLogHistoryCharCount +
+                hashcatLiveStatus.values.sumOf { it.length + 1 } + 2
+
+            return buildString(estimatedChars) {
+                hashcatLogHistory.forEach { line ->
+                    append(line)
+                    append('\n')
+                }
+
+                if (hashcatLiveStatus.isNotEmpty())
+                {
+                    if (isNotEmpty() && this[lastIndex] != '\n') append('\n')
+                    append('\n')
+
+                    hashcatLiveStatus.values.forEach { line ->
+                        append(line)
+                        append('\n')
+                    }
+                }
+            }
+        }
+    }
+
+    private fun shareHashcatLog()
+    {
+        flushHashcatLog()
+        val logText = buildHashcatLogText().trimEnd()
+
+        if (logText.isEmpty())
+        {
+            binding.shareHashcatLogButton.isEnabled = false
+            return
+        }
+
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, getString(R.string.hashcat_log_title))
+            putExtra(Intent.EXTRA_TEXT, logText)
+        }
+        startActivity(Intent.createChooser(intent, getString(R.string.share_log_title)))
+    }
+
     private fun appendHashcatLog(line: String)
     {
         android.util.Log.i("Hashcat", line)
@@ -1670,26 +2326,9 @@ class MainActivity : Activity()
 
         trimHashcatHistory()
 
-        val estimatedChars = hashcatLogHistoryCharCount +
-            hashcatLiveStatus.values.sumOf { it.length + 1 } + 2
-
-        binding.hashcatLogTextView.setLogText(buildString(estimatedChars) {
-            hashcatLogHistory.forEach { line ->
-                append(line)
-                append('\n')
-            }
-
-            if (hashcatLiveStatus.isNotEmpty())
-            {
-                if (isNotEmpty() && this[lastIndex] != '\n') append('\n')
-                append('\n')
-
-                hashcatLiveStatus.values.forEach { line ->
-                    append(line)
-                    append('\n')
-                }
-            }
-        })
+        val logText = buildHashcatLogText()
+        binding.hashcatLogTextView.setLogText(logText)
+        binding.shareHashcatLogButton.isEnabled = logText.isNotBlank()
 
         var scheduleNextFlush = false
 
@@ -1776,29 +2415,25 @@ class MainActivity : Activity()
         }
 
         binding.selectCaptureButton.isEnabled = !busy
-        binding.convertButton.isEnabled = !busy && selectedCaptureUri != null
+        binding.pasteCaptureButton.isEnabled = !busy
+        binding.convertButton.isEnabled = !busy && pendingConversion != null
     }
 
     private fun setHashcatBusy(busy: Boolean)
     {
-        binding.hashcatProgressBar.visibility = if (busy)
-        {
-            View.VISIBLE
-        }
-        else
-        {
-            View.GONE
-        }
 
         binding.hashModeButton.isEnabled = !busy && hashcatReady
         binding.selectHashFileButton.isEnabled = !busy
         binding.pasteHashButton.isEnabled = !busy
-        binding.candidateTemplateRadioButton.isEnabled = !busy
-        binding.candidateWordlistRadioButton.isEnabled = !busy
         binding.maskTemplateEditText.isEnabled = !busy && candidateSource == CANDIDATE_SOURCE_TEMPLATE
         binding.maskAssistantButton.isEnabled = !busy && candidateSource == CANDIDATE_SOURCE_TEMPLATE
+        binding.candidateCharsetValueTextView.isEnabled = !busy && candidateSource == CANDIDATE_SOURCE_TEMPLATE
+        binding.candidateLengthValueTextView.isEnabled = !busy && candidateSource == CANDIDATE_SOURCE_TEMPLATE
         binding.selectWordlistButton.isEnabled = !busy && candidateSource == CANDIDATE_SOURCE_WORDLIST
+        binding.candidateSourceSpinner.isEnabled = !busy
         binding.memoryProfileSpinner.isEnabled = !busy
+        binding.workloadSpinner.isEnabled = !busy
+        binding.optimizedKernelSwitch.isEnabled = !busy
         binding.startHashcatButton.text = when (hashcatRunState)
         {
             HashcatRunState.STARTING,
@@ -1841,9 +2476,7 @@ class MainActivity : Activity()
             HashcatRunState.STARTING,
             HashcatRunState.RUNNING -> true
             HashcatRunState.STOPPING -> false
-            HashcatRunState.IDLE -> hasHashInput &&
-                hasCandidates &&
-                hashcatReady
+            HashcatRunState.IDLE -> hasHashInput && hasCandidates && hashcatReady
         }
     }
 
@@ -2171,6 +2804,11 @@ class MainActivity : Activity()
 
     private fun queryDisplayName(uri: Uri): String
     {
+        if (uri.scheme == "file")
+        {
+            return uri.path?.let(::File)?.name ?: getString(R.string.unknown_file_name)
+        }
+
         contentResolver.query(
             uri,
             arrayOf(OpenableColumns.DISPLAY_NAME),
@@ -2209,6 +2847,8 @@ class MainActivity : Activity()
         const val PREFERENCE_THEME = "theme"
         const val PREFERENCE_LANGUAGE = "language"
         const val PREFERENCE_MEMORY_PROFILE = "memory_profile"
+        const val PREFERENCE_WORKLOAD_PROFILE = "workload_profile"
+        const val PREFERENCE_OPTIMIZED_KERNEL = "optimized_kernel"
         const val PREFERENCE_HASH_MODE = "hash_mode"
         const val PREFERENCE_CANDIDATE_SOURCE = "candidate_source"
         const val PREFERENCE_MASK_TEMPLATE = "mask_template"
@@ -2216,6 +2856,7 @@ class MainActivity : Activity()
         const val PREFERENCE_MASK_MIN_LENGTH = "mask_min_length"
         const val PREFERENCE_MASK_MAX_LENGTH = "mask_max_length"
         const val PREFERENCE_WORDLIST_URI = "wordlist_uri"
+        const val PREFERENCE_PASSWORD_ENTRIES = "password_entries"
         const val THEME_LIGHT = "light"
         const val THEME_DARK = "dark"
         const val LANGUAGE_RUSSIAN = "ru"

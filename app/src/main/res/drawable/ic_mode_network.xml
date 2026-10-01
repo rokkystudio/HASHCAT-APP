@@ -2,6 +2,6 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#FF000000"
+    <path android:fillColor="@color/button_icon"
         android:pathData="M12,2a3,3 0,1 1,0 6a3,3 0,0 1,0 -6zM5,16a3,3 0,1 1,0 6a3,3 0,0 1,0 -6zM19,16a3,3 0,1 1,0 6a3,3 0,0 1,0 -6zM10.9,7.8l-4.3,8.6 -1.8,-0.9 4.3,-8.6 1.8,0.9zM13.1,7.8l4.3,8.6 1.8,-0.9 -4.3,-8.6 -1.8,0.9zM8,18h8v2H8z" />
 </vector>

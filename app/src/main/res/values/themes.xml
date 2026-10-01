@@ -23,7 +23,6 @@
 
     <style name="Hashcat.BottomNavigation" parent="Widget.Material3.BottomNavigationView">
         <item name="android:background">@color/navigation_background</item>
-        <item name="itemIconTint">@color/bottom_nav_item_color</item>
         <item name="itemTextColor">@color/bottom_nav_item_color</item>
         <item name="itemActiveIndicatorStyle">@style/Hashcat.BottomNavigation.ActiveIndicator</item>
     </style>

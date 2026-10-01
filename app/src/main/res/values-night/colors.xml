@@ -11,8 +11,15 @@
     <color name="accent">#FF69AFED</color>
     <color name="title_bar_button_pressed">#FF283F4D</color>
     <color name="button_pressed">#FF1D232A</color>
+    <color name="button_surface">#FF2A303A</color>
+    <color name="button_disabled">#FF20252D</color>
+    <color name="button_text_disabled">#FF4B525B</color>
+    <color name="border_disabled">#FF303841</color>
     <color name="navigation_background">#FF1D232A</color>
     <color name="navigation_icon_active">#FF69AFED</color>
     <color name="navigation_icon_inactive">#FF8D949C</color>
+    <color name="navigation_hashcat_running">#FF2E9D57</color>
+    <color name="navigation_hashcat_error">#FFD64545</color>
     <color name="navigation_active_indicator">#FF283F4D</color>
+    <color name="button_icon">#FFFFFFFF</color>
 </resources>

@@ -12,8 +12,8 @@ android {
         applicationId = "fuck.system.hashcat"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 10100
+        versionName = "1.1.0"
 
         ndk {
             abiFilters += listOf(
@@ -36,7 +36,11 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            keepDebugSymbols += "**/libhashcat_exec.so"
+            keepDebugSymbols += setOf(
+                "**/libhashcat_exec.so",
+                "**/libc++_shared.so",
+                "**/liblzma.so"
+            )
         }
     }
 
@@ -47,6 +51,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 

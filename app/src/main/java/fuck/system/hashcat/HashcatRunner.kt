@@ -74,15 +74,28 @@ class HashcatRunner(
     }
 
     /**
-     * Defines the Android memory budget for a Hashcat run. AUTO leaves memory
-     * sizing to Hashcat; explicit profiles cap unified device and host memory.
+     * Defines the optional Android memory budget for a Hashcat run.
      */
     enum class MemoryProfile(val memoryLimitMb: Int?)
     {
-        AUTO(null),
-        LOW(768),
-        BALANCED(1536),
-        HIGH(3072)
+        DISABLED(null),
+        MB_512(512),
+        MB_768(768),
+        MB_1024(1024),
+        MB_1280(1280),
+        MB_1536(1536)
+    }
+
+    /**
+     * Defines an optional Hashcat workload profile passed through -w.
+     */
+    enum class WorkloadProfile(val value: Int?)
+    {
+        DISABLED(null),
+        LOW(1),
+        DEFAULT(2),
+        HIGH(3),
+        MAXIMUM(4)
     }
 
     @Volatile
@@ -152,6 +165,8 @@ class HashcatRunner(
         hashMode: Int,
         recoveredFile: File,
         memoryProfile: MemoryProfile,
+        workloadProfile: WorkloadProfile,
+        optimizedKernel: Boolean,
         listener: Listener
     )
     {
@@ -183,7 +198,9 @@ class HashcatRunner(
             hashMode = hashMode,
             potfile = potfile,
             recovered = recoveredFile,
-            memoryProfile = memoryProfile
+            memoryProfile = memoryProfile,
+            workloadProfile = workloadProfile,
+            optimizedKernel = optimizedKernel
         )
 
         val processCommand = buildPrioritizedCommand(command)
@@ -197,7 +214,6 @@ class HashcatRunner(
             put("XDG_DATA_HOME", dataDirectory.absolutePath)
             put("XDG_CACHE_HOME", cacheDirectory.absolutePath)
             put("HASHCAT_SHARED_FOLDER", runtimeDirectory.absolutePath)
-            put("HASHCAT_MEMORY", "1")
             memoryProfile.memoryLimitMb?.let { limitMb ->
                 put("HASHCAT_MEMORY_LIMIT_MB", limitMb.toString())
             }
@@ -296,12 +312,15 @@ class HashcatRunner(
     }
 
     private fun buildCommand(
-        executable: File,        hashFile: File,
+        executable: File,
+        hashFile: File,
         candidateSource: CandidateSource,
         hashMode: Int,
         potfile: File,
         recovered: File,
-        memoryProfile: MemoryProfile
+        memoryProfile: MemoryProfile,
+        workloadProfile: WorkloadProfile,
+        optimizedKernel: Boolean
     ): List<String>
     {
         val command = ArrayList<String>()
@@ -325,26 +344,14 @@ class HashcatRunner(
         command += "--outfile"
         command += recovered.absolutePath
 
-        when (memoryProfile)
+        workloadProfile.value?.let { workload ->
+            command += "-w"
+            command += workload.toString()
+        }
+
+        if (optimizedKernel)
         {
-            MemoryProfile.AUTO -> Unit
-            MemoryProfile.LOW ->
-            {
-                command += "-w"
-                command += "1"
-            }
-            MemoryProfile.BALANCED ->
-            {
-                command += "-O"
-                command += "-w"
-                command += "1"
-            }
-            MemoryProfile.HIGH ->
-            {
-                command += "-O"
-                command += "-w"
-                command += "3"
-            }
+            command += "-O"
         }
 
         when (candidateSource)
