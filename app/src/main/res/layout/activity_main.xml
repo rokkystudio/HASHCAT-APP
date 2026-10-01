@@ -689,6 +689,15 @@
                         android:textIsSelectable="true"
                         android:textSize="12sp" />
 
+                    <TextView
+                        android:id="@+id/hashcatStartupWarningTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="@string/hashcat_startup_warning"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:visibility="gone" />
 
                     <TextView
                         android:id="@+id/hashcatProgressPercentTextView"

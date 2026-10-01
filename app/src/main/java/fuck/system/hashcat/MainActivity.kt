@@ -2142,6 +2142,14 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
             hashcatStatus.speed ?: fallback,
             hashcatStatus.recovered ?: fallback
         )
+        binding.hashcatStartupWarningTextView.visibility = if (hashcatRunState == HashcatRunState.STARTING)
+        {
+            View.VISIBLE
+        }
+        else
+        {
+            View.GONE
+        }
     }
 
     private fun formatDuration(milliseconds: Long): String

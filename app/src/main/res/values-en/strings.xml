@@ -47,6 +47,7 @@
     <string name="hashcat_status_kernel_compiling">Compiling OpenCL kernel</string>
     <string name="hashcat_status_kernels_memory">Initializing kernels and memory</string>
     <string name="hashcat_status_autotune">Autotuning device</string>
+    <string name="hashcat_startup_warning">The first Hashcat run on this device can take several minutes while OpenCL initializes, kernels compile and autotune completes. Wait until the status changes to “Running”.</string>
     <string name="hashcat_status_running">Running</string>
     <string name="hashcat_status_stopping">Stopping</string>
     <string name="hashcat_status_finished">Finished</string>

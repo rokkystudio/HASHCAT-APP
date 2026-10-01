@@ -47,6 +47,7 @@
     <string name="hashcat_status_kernel_compiling">Компиляция OpenCL kernel</string>
     <string name="hashcat_status_kernels_memory">Инициализация kernels и памяти</string>
     <string name="hashcat_status_autotune">Автонастройка устройства</string>
+    <string name="hashcat_startup_warning">Первый запуск Hashcat на устройстве может занимать несколько минут из-за инициализации OpenCL, компиляции ядер и автонастройки. Дождитесь статуса «Запущен».</string>
     <string name="hashcat_status_running">Запущен</string>
     <string name="hashcat_status_stopping">Остановка</string>
     <string name="hashcat_status_finished">Завершён</string>

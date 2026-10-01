@@ -21,13 +21,16 @@ Android-интерфейс для Hashcat, ориентированный на �
 
 ## Скриншоты
 
-### Светлая тема
-
-![HASHCAT Android — русская светлая тема](files/main-ru-light.png)
-
-### Тёмная тема
-
-![HASHCAT Android — русская тёмная тема](files/main-ru-dark.png)
+<table>
+  <tr>
+    <td align="center"><strong>Светлая тема</strong></td>
+    <td align="center"><strong>Тёмная тема</strong></td>
+  </tr>
+  <tr>
+    <td><img src="files/main-ru-light.png" alt="HASHCAT Android — русская светлая тема" width="360"></td>
+    <td><img src="files/main-ru-dark.png" alt="HASHCAT Android — русская тёмная тема" width="360"></td>
+  </tr>
+</table>
 
 ## Сборка
 

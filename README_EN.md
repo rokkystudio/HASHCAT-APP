@@ -21,13 +21,16 @@ The application runs the bundled Hashcat runtime on Android, provides hash-mode 
 
 ## Screenshots
 
-### Light theme
-
-![HASHCAT Android — English light theme](files/main-en-light.png)
-
-### Dark theme
-
-![HASHCAT Android — English dark theme](files/main-en-dark.png)
+<table>
+  <tr>
+    <td align="center"><strong>Light theme</strong></td>
+    <td align="center"><strong>Dark theme</strong></td>
+  </tr>
+  <tr>
+    <td><img src="files/main-en-light.png" alt="HASHCAT Android — English light theme" width="360"></td>
+    <td><img src="files/main-en-dark.png" alt="HASHCAT Android — English dark theme" width="360"></td>
+  </tr>
+</table>
 
 ## Build
 
