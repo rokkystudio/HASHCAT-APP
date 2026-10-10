@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import com.rokkystudio.sharedapp.neoui.NeoThemeMode
+import com.rokkystudio.sharedapp.neoui.NeoUiSettings
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -111,29 +113,8 @@ class MainActivity : ComponentActivity()
      */
     override fun attachBaseContext(newBase: Context)
     {
-        val preferences = newBase.getSharedPreferences(
-            PREFERENCES_NAME,
-            Context.MODE_PRIVATE
-        )
-        val theme = preferences.getString(PREFERENCE_THEME, THEME_LIGHT) ?: THEME_LIGHT
-        val language = preferences.getString(PREFERENCE_LANGUAGE, LANGUAGE_RUSSIAN)
-            ?: LANGUAGE_RUSSIAN
         val configuration = Configuration(newBase.resources.configuration)
-        val nightMode = if (theme == THEME_DARK)
-        {
-            Configuration.UI_MODE_NIGHT_YES
-        }
-        else
-        {
-            Configuration.UI_MODE_NIGHT_NO
-        }
-        val locale = Locale.forLanguageTag(language)
-
-        configuration.uiMode =
-            (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or nightMode
-        configuration.setLocale(locale)
-        configuration.setLayoutDirection(locale)
-
+        hashcatUiSettings(newBase).applyToConfiguration(configuration)
         super.attachBaseContext(newBase.createConfigurationContext(configuration))
     }
 
@@ -147,7 +128,6 @@ class MainActivity : ComponentActivity()
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        binding.appVersionTextView.text = "v${BuildConfig.VERSION_NAME}"
         requestNotificationPermission()
 
         hashcatRunner = HashcatRunner(this)
@@ -169,15 +149,6 @@ class MainActivity : ComponentActivity()
         binding.hashModeButton.isEnabled = false
         renderHashcatStatus()
         renderPasswordEntries()
-
-        binding.themeToggleButton.setOnClickListener {
-            toggleTheme()
-        }
-
-        binding.languageFlag.setOnClickListener {
-            toggleLanguage()
-        }
-
         setupBottomNavigationColors()
         applyButtonIconColors()
 
@@ -430,79 +401,29 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         )
     }
 
-    private fun toggleTheme()
-    {
-        val preferences = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-        val currentTheme = preferences.getString(PREFERENCE_THEME, THEME_LIGHT) ?: THEME_LIGHT
-        val nextTheme = if (currentTheme == THEME_DARK)
-        {
-            THEME_LIGHT
-        }
-        else
-        {
-            THEME_DARK
-        }
-
-        preferences.edit()
-            .putString(PREFERENCE_THEME, nextTheme)
-            .apply()
-
-        recreate()
-    }
-
-    private fun toggleLanguage()
-    {
-        val preferences = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-        val currentLanguage = preferences.getString(
-            PREFERENCE_LANGUAGE,
-            LANGUAGE_RUSSIAN
-        ) ?: LANGUAGE_RUSSIAN
-        val nextLanguage = if (currentLanguage == LANGUAGE_RUSSIAN)
-        {
-            LANGUAGE_ENGLISH
-        }
-        else
-        {
-            LANGUAGE_RUSSIAN
-        }
-
-        preferences.edit()
-            .putString(PREFERENCE_LANGUAGE, nextLanguage)
-            .apply()
-
-        recreate()
-    }
-
     private fun renderHeaderControls()
     {
-        val preferences = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-        val theme = preferences.getString(PREFERENCE_THEME, THEME_LIGHT) ?: THEME_LIGHT
-        val language = preferences.getString(
-            PREFERENCE_LANGUAGE,
-            LANGUAGE_RUSSIAN
-        ) ?: LANGUAGE_RUSSIAN
+        val uiSettings = hashcatUiSettings(this)
+        binding.neoTopBar.setAppInfo(
+            title = getString(R.string.app_name),
+            subtitle = getString(R.string.app_subtitle),
+            version = BuildConfig.VERSION_NAME,
+            iconResId = R.mipmap.ic_launcher,
+        )
+        uiSettings.bindTopBar(binding.neoTopBar) {
+            uiSettings.applyAppCompatNightMode()
+            recreate()
+        }
+    }
 
-        if (theme == THEME_DARK)
-        {
-            binding.themeToggleButton.setImageResource(R.drawable.theme_moon)
-            binding.themeToggleButton.contentDescription = getString(R.string.theme_dark)
-        }
-        else
-        {
-            binding.themeToggleButton.setImageResource(R.drawable.theme_sun)
-            binding.themeToggleButton.contentDescription = getString(R.string.theme_light)
-        }
-
-        if (language == LANGUAGE_RUSSIAN)
-        {
-            binding.languageFlag.setImageResource(R.drawable.flag_ru)
-            binding.languageFlag.contentDescription = getString(R.string.language_russian)
-        }
-        else
-        {
-            binding.languageFlag.setImageResource(R.drawable.flag_us)
-            binding.languageFlag.contentDescription = getString(R.string.language_english)
-        }
+    private fun hashcatUiSettings(context: Context): NeoUiSettings
+    {
+        return NeoUiSettings(
+            context = context,
+            preferencesName = PREFERENCES_NAME,
+            defaultTheme = NeoThemeMode.LIGHT,
+            defaultLanguageTag = LANGUAGE_RUSSIAN,
+        )
     }
 
     private fun applyButtonIconColors()
@@ -2852,8 +2773,6 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         const val REQUEST_POST_NOTIFICATIONS = 1005
 
         const val PREFERENCES_NAME = "hashcat_ui"
-        const val PREFERENCE_THEME = "theme"
-        const val PREFERENCE_LANGUAGE = "language"
         const val PREFERENCE_MEMORY_PROFILE = "memory_profile"
         const val PREFERENCE_WORKLOAD_PROFILE = "workload_profile"
         const val PREFERENCE_OPTIMIZED_KERNEL = "optimized_kernel"
@@ -2865,10 +2784,7 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         const val PREFERENCE_MASK_MAX_LENGTH = "mask_max_length"
         const val PREFERENCE_WORDLIST_URI = "wordlist_uri"
         const val PREFERENCE_PASSWORD_ENTRIES = "password_entries"
-        const val THEME_LIGHT = "light"
-        const val THEME_DARK = "dark"
         const val LANGUAGE_RUSSIAN = "ru"
-        const val LANGUAGE_ENGLISH = "en"
 
         const val STATE_SELECTED_SCREEN = "selected_screen"
         const val STATE_CAPTURE_URI = "capture_uri"

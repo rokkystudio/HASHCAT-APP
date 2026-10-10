@@ -22,6 +22,9 @@ dependencyResolutionManagement {
     }
 }
 
+includeBuild("../SHARED-APP/geo")
+includeBuild("../SHARED-APP/neoui")
+
 rootProject.name = "HASHCAT-APP"
 include(":app")
 include(":hashcat")
