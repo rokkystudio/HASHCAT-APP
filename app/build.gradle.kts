@@ -12,8 +12,8 @@ android {
         applicationId = "fuck.system.hashcat"
         minSdk = 26
         targetSdk = 37
-        versionCode = 10118
-        versionName = "1.1.18"
+        versionCode = 10119
+        versionName = "1.1.19"
 
         ndk {
             abiFilters += listOf(
