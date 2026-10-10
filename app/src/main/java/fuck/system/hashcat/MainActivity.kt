@@ -7,9 +7,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.Configuration
-import com.rokkystudio.sharedapp.neoui.NeoThemeMode
-import com.rokkystudio.sharedapp.neoui.NeoUiSettings
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -18,8 +15,6 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.text.Editable
-import android.text.SpannableString
-import android.text.style.ForegroundColorSpan
 import android.text.TextWatcher
 import android.view.View
 import android.widget.AdapterView
@@ -28,8 +23,13 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
+import com.rokkystudio.sharedapp.neoui.NeoLanguageDefaults
+import com.rokkystudio.sharedapp.neoui.NeoThemeDefaults
+import com.rokkystudio.sharedapp.neoui.NeoTopBarView
 import fuck.system.hashcat.databinding.ActivityMainBinding
 import java.io.File
 import java.io.OutputStreamWriter
@@ -37,6 +37,9 @@ import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.concurrent.thread
+import com.rokkystudio.sharedapp.neoui.NeoNavigatorStyle
+import com.rokkystudio.sharedapp.neoui.NeoScreenItem
+import com.rokkystudio.sharedapp.neoui.NeoScreenNavigatorView
 
 /**
  * Hosts the Hashcat, CAP converter and log screens, applies the persisted light
@@ -44,7 +47,7 @@ import kotlin.concurrent.thread
  * clipboard and forwards native Hashcat output to the log screen.
  */
 @Suppress("DEPRECATION")
-class MainActivity : ComponentActivity()
+class MainActivity : AppCompatActivity()
 {
     private data class HashcatStatus(
         val state: String? = null,
@@ -61,6 +64,11 @@ class MainActivity : ComponentActivity()
         val password: String
     )
 
+    private enum class HashcatFailure
+    {
+        OPENCL_HOST_MEMORY
+    }
+
     private enum class HashcatRunState
     {
         IDLE,
@@ -71,6 +79,9 @@ class MainActivity : ComponentActivity()
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var hashcatRunner: HashcatRunner
+    private lateinit var uiSettings: UiSettings
+    private lateinit var neoTopBar: NeoTopBarView
+    private lateinit var hashcatSession: HashcatSession
 
     private var selectedCaptureUri: Uri? = null
     private var selectedHashUri: Uri? = null
@@ -85,6 +96,8 @@ class MainActivity : ComponentActivity()
     private var hashcatRunState: HashcatRunState = HashcatRunState.IDLE
     private var hashcatNavigationError: Boolean = false
     private var hashcatStatus: HashcatStatus = HashcatStatus()
+    private var hashcatFailure: HashcatFailure? = null
+    private var lastBottomNavigationSignature: String? = null
     private var hashcatStartedAtRealtime: Long = 0L
     private var candidateSource: String = CANDIDATE_SOURCE_TEMPLATE
     private var maskTemplate: String = DEFAULT_MASK_TEMPLATE
@@ -106,16 +119,40 @@ class MainActivity : ComponentActivity()
     private var hashcatLogHistoryCharCount = 0
     private var hashcatLogFlushScheduled = false
     private val hashcatLogFlushRunnable = Runnable { flushHashcatLog() }
-
-    /**
-     * Applies the saved light or dark theme and application language before
-     * Android inflates localized resources.
-     */
-    override fun attachBaseContext(newBase: Context)
+    private val hashcatSessionObserver = object : HashcatSession.Observer
     {
-        val configuration = Configuration(newBase.resources.configuration)
-        hashcatUiSettings(newBase).applyToConfiguration(configuration)
-        super.attachBaseContext(newBase.createConfigurationContext(configuration))
+        override fun onSnapshot(snapshot: HashcatSession.Snapshot)
+        {
+            runOnUiThread {
+                applyHashcatSessionSnapshot(snapshot)
+            }
+        }
+
+        override fun onStarted(command: List<String>)
+        {
+            runOnUiThread {
+                handleHashcatStarted(command)
+            }
+        }
+
+        override fun onOutput(line: String)
+        {
+            handleHashcatOutput(line)
+        }
+
+        override fun onFinished(exitCode: Int, recoveredFile: File, hashFile: File)
+        {
+            runOnUiThread {
+                handleHashcatFinished(exitCode, recoveredFile, hashFile)
+            }
+        }
+
+        override fun onError(error: Throwable)
+        {
+            runOnUiThread {
+                handleHashcatError(error)
+            }
+        }
     }
 
     /**
@@ -128,16 +165,21 @@ class MainActivity : ComponentActivity()
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        uiSettings = UiSettings(applicationContext)
+        neoTopBar = binding.neoTopBar
+        renderTopBar()
         requestNotificationPermission()
 
         hashcatRunner = HashcatRunner(this)
+        hashcatSession = HashcatSession.get(applicationContext)
+        hashcatSession.addObserver(hashcatSessionObserver)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true)
         {
             override fun handleOnBackPressed()
             {
                 if (selectedScreenId != R.id.nav_hashcat)
                 {
-                    binding.bottomNav.selectedItemId = R.id.nav_hashcat
+                    showScreen(R.id.nav_hashcat)
                     return
                 }
 
@@ -149,7 +191,9 @@ class MainActivity : ComponentActivity()
         binding.hashModeButton.isEnabled = false
         renderHashcatStatus()
         renderPasswordEntries()
-        setupBottomNavigationColors()
+
+
+        setupBottomNavigation()
         applyButtonIconColors()
 
         binding.clearHashcatLogButton.setOnClickListener {
@@ -163,22 +207,6 @@ class MainActivity : ComponentActivity()
         binding.clearPasswordsButton.setOnClickListener {
             savePasswordEntries(emptyList())
             renderPasswordEntries()
-        }
-
-        binding.bottomNav.setOnItemSelectedListener { item ->
-            when (item.itemId)
-            {
-                R.id.nav_hashcat,
-                R.id.nav_converter,
-                R.id.nav_passwords,
-                R.id.nav_log ->
-                {
-                    showScreen(item.itemId)
-                    true
-                }
-
-                else -> false
-            }
         }
 
         binding.selectHashFileButton.setOnClickListener {
@@ -309,14 +337,14 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
 
         restorePersistentHashcatState()
         restoreUiState(savedInstanceState)
-        renderHeaderControls()
+        restoreHashcatLog(savedInstanceState)
+        renderTopBar()
         renderCandidateSource()
         renderMemoryProfile()
         renderWorkloadProfile()
         renderOptimizedKernel()
         renderHashcatMemoryInfo()
         showScreen(selectedScreenId)
-        binding.bottomNav.selectedItemId = selectedScreenId
         updateHashcatStartState()
         prepareHashcatInBackground()
     }
@@ -344,6 +372,7 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         outState.putInt(STATE_MASK_MIN_LENGTH, maskMinLength)
         outState.putInt(STATE_MASK_MAX_LENGTH, maskMaxLength)
         outState.putString(STATE_MEMORY_PROFILE, selectedMemoryProfile.name)
+        outState.putString(STATE_HASHCAT_LOG_TEXT, snapshotHashcatLogText())
     }
 
 
@@ -353,11 +382,7 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
     override fun onDestroy()
     {
         hashcatLogHandler.removeCallbacks(hashcatLogFlushRunnable)
-        hashcatRunner.stop(
-            "MainActivity.onDestroy finishing=$isFinishing " +
-                "changingConfigurations=$isChangingConfigurations"
-        )
-        stopHashcatForegroundService()
+        hashcatSession.removeObserver(hashcatSessionObserver)
         super.onDestroy()
     }
 
@@ -401,28 +426,69 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         )
     }
 
-    private fun renderHeaderControls()
+    private fun renderTopBar()
     {
-        val uiSettings = hashcatUiSettings(this)
-        binding.neoTopBar.setAppInfo(
+        neoTopBar.setAppInfo(
             title = getString(R.string.app_name),
-            subtitle = getString(R.string.app_subtitle),
+            subtitle = getString(R.string.android_client),
             version = BuildConfig.VERSION_NAME,
-            iconResId = R.mipmap.ic_launcher,
+            iconResId = R.mipmap.ic_launcher
         )
-        uiSettings.bindTopBar(binding.neoTopBar) {
-            uiSettings.applyAppCompatNightMode()
-            recreate()
+        neoTopBar.setThemeOptions(
+            options = NeoThemeDefaults.dayNight(),
+            selected = selectedNeoTheme(),
+            onSelected = ::applyNeoTheme
+        )
+        neoTopBar.setLanguageOptions(
+            options = NeoLanguageDefaults.supportedLanguages(),
+            selected = uiSettings.getLanguage(),
+            onSelected = ::applyNeoLanguage
+        )
+        neoTopBar.setThemeButtonVisible(true)
+        neoTopBar.setLanguageButtonVisible(true)
+    }
+
+    private fun selectedNeoTheme(): String
+    {
+        return when (uiSettings.getTheme())
+        {
+            AppTheme.LIGHT -> NeoThemeDefaults.DAY
+            AppTheme.DARK -> NeoThemeDefaults.NIGHT
         }
     }
 
-    private fun hashcatUiSettings(context: Context): NeoUiSettings
+    private fun applyNeoTheme(theme: String)
     {
-        return NeoUiSettings(
-            context = context,
-            preferencesName = PREFERENCES_NAME,
-            defaultTheme = NeoThemeMode.LIGHT,
-            defaultLanguageTag = LANGUAGE_RUSSIAN,
+        val appTheme = when (theme)
+        {
+            NeoThemeDefaults.DAY -> AppTheme.LIGHT
+            NeoThemeDefaults.NIGHT -> AppTheme.DARK
+            else -> return
+        }
+        if (uiSettings.getTheme() == appTheme)
+        {
+            return
+        }
+        uiSettings.setTheme(appTheme)
+        lastBottomNavigationSignature = null
+        AppCompatDelegate.setDefaultNightMode(
+            when (appTheme)
+            {
+                AppTheme.LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
+                AppTheme.DARK -> AppCompatDelegate.MODE_NIGHT_YES
+            }
+        )
+    }
+
+    private fun applyNeoLanguage(language: String)
+    {
+        if (uiSettings.getLanguage() == language)
+        {
+            return
+        }
+        uiSettings.setLanguage(language)
+        AppCompatDelegate.setApplicationLocales(
+            LocaleListCompat.forLanguageTags(language)
         )
     }
 
@@ -435,75 +501,80 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         binding.hashModeIconImageView.imageTintList = tint
     }
 
-    private fun setupBottomNavigationColors()
+    private fun setupBottomNavigation()
     {
-        binding.bottomNav.itemIconTintList = null
-        binding.bottomNav.itemTextColor = null
-        updateBottomNavigationColors()
+        binding.bottomNav.setStyle(NeoNavigatorStyle.defaults(this))
+        renderBottomNavigation(force = true)
     }
 
-    private fun updateBottomNavigationColors()
+    private fun renderBottomNavigation(force: Boolean = false)
     {
-        val activeColor = resources.getColor(R.color.navigation_icon_active, theme)
-        val inactiveColor = resources.getColor(R.color.navigation_icon_inactive, theme)
-
-        tintNavigationIcon(
-            R.id.nav_converter,
-            if (selectedScreenId == R.id.nav_converter) activeColor else inactiveColor
+        val running = isHashcatBusy()
+        val signature = listOf(
+            selectedScreenId,
+            hashcatNavigationError,
+            running,
+            selectedNeoTheme()
+        ).joinToString(separator = ":")
+        if (!force && signature == lastBottomNavigationSignature)
+        {
+            return
+        }
+        lastBottomNavigationSignature = signature
+        binding.bottomNav.setItems(
+            items = bottomNavigationItems(running),
+            selectedValue = selectedScreenId,
+            placement = NeoScreenNavigatorView.Placement.BOTTOM,
+            onSelected = ::showScreen
         )
-        tintNavigationIcon(
-            R.id.nav_passwords,
-            if (selectedScreenId == R.id.nav_passwords) activeColor else inactiveColor
-        )
-        tintNavigationIcon(
-            R.id.nav_log,
-            if (selectedScreenId == R.id.nav_log) activeColor else inactiveColor
-        )
-        updateHashcatNavigationColor(activeColor, inactiveColor)
     }
 
-    private fun updateHashcatNavigationColor(
-        activeColor: Int = resources.getColor(R.color.navigation_icon_active, theme),
-        inactiveColor: Int = resources.getColor(R.color.navigation_icon_inactive, theme)
-    )
+    private fun bottomNavigationItems(running: Boolean): List<NeoScreenItem<Int>>
     {
-        val running = hashcatRunState == HashcatRunState.STARTING ||
-            hashcatRunState == HashcatRunState.RUNNING ||
-            hashcatRunState == HashcatRunState.STOPPING
-        val color = when
+        val hashcatColor = when
         {
             hashcatNavigationError -> resources.getColor(R.color.navigation_hashcat_error, theme)
             running -> resources.getColor(R.color.navigation_hashcat_running, theme)
-            selectedScreenId == R.id.nav_hashcat -> activeColor
-            else -> inactiveColor
+            else -> null
         }
-
-        tintNavigationIcon(R.id.nav_hashcat, color)
-
-        val item = binding.bottomNav.menu.findItem(R.id.nav_hashcat) ?: return
-        item.title = if (hashcatNavigationError || running)
-        {
-            SpannableString(getString(R.string.nav_hashcat)).apply {
-                setSpan(ForegroundColorSpan(color), 0, length, 0)
-            }
-        }
-        else
-        {
-            getString(R.string.nav_hashcat)
-        }
+        return listOf(
+            NeoScreenItem(
+                value = R.id.nav_converter,
+                title = getString(R.string.nav_converter),
+                iconResId = R.drawable.ic_converter
+            ),
+            NeoScreenItem(
+                value = R.id.nav_hashcat,
+                title = getString(R.string.nav_hashcat),
+                iconResId = R.drawable.ic_hashcat,
+                selectedTextColor = hashcatColor,
+                unselectedTextColor = hashcatColor,
+                selectedIconTint = hashcatColor,
+                unselectedIconTint = hashcatColor
+            ),
+            NeoScreenItem(
+                value = R.id.nav_passwords,
+                title = getString(R.string.nav_passwords),
+                iconResId = R.drawable.ic_password
+            ),
+            NeoScreenItem(
+                value = R.id.nav_log,
+                title = getString(R.string.nav_log),
+                iconResId = R.drawable.ic_log
+            )
+        )
     }
 
-    private fun tintNavigationIcon(itemId: Int, color: Int)
+    private fun isHashcatBusy(): Boolean
     {
-        val item = binding.bottomNav.menu.findItem(itemId) ?: return
-        val icon = item.icon?.mutate() ?: return
-        icon.setTintList(android.content.res.ColorStateList.valueOf(color))
-        item.icon = icon
+        return hashcatRunState == HashcatRunState.STARTING ||
+            hashcatRunState == HashcatRunState.RUNNING ||
+            hashcatRunState == HashcatRunState.STOPPING
     }
     private fun showScreen(itemId: Int)
     {
         selectedScreenId = itemId
-        updateBottomNavigationColors()
+        renderBottomNavigation()
         binding.hashcatScreen.visibility = if (itemId == R.id.nav_hashcat)
         {
             View.VISIBLE
@@ -1167,7 +1238,7 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
             this,
             mode
         )
-        binding.hashModeButton.isEnabled = !hashcatRunner.isRunning()
+        binding.hashModeButton.isEnabled = !hashcatSession.isRunning()
     }
 
     private fun showMaskAssistant()
@@ -1201,11 +1272,11 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         binding.wordlistFileTextView.visibility = if (useTemplate) View.GONE else View.VISIBLE
         binding.wordlistFileInfoTextView.visibility = if (useTemplate) View.GONE else View.VISIBLE
         binding.selectWordlistButton.visibility = if (useTemplate) View.GONE else View.VISIBLE
-        binding.maskTemplateEditText.isEnabled = useTemplate && !hashcatRunner.isRunning()
-        binding.maskAssistantButton.isEnabled = useTemplate && !hashcatRunner.isRunning()
-        binding.candidateCharsetValueTextView.isEnabled = useTemplate && !hashcatRunner.isRunning()
-        binding.candidateLengthValueTextView.isEnabled = useTemplate && !hashcatRunner.isRunning()
-        binding.selectWordlistButton.isEnabled = !useTemplate && !hashcatRunner.isRunning()
+        binding.maskTemplateEditText.isEnabled = useTemplate && !hashcatSession.isRunning()
+        binding.maskAssistantButton.isEnabled = useTemplate && !hashcatSession.isRunning()
+        binding.candidateCharsetValueTextView.isEnabled = useTemplate && !hashcatSession.isRunning()
+        binding.candidateLengthValueTextView.isEnabled = useTemplate && !hashcatSession.isRunning()
+        binding.selectWordlistButton.isEnabled = !useTemplate && !hashcatSession.isRunning()
 
         if (binding.maskTemplateEditText.text.toString() != maskTemplate)
         {
@@ -1471,37 +1542,22 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         appendHashcatLog(getString(R.string.hashcat_stopping))
         binding.startHashcatButton.text = getString(R.string.hashcat_status_stopping)
         binding.startHashcatButton.isEnabled = false
-        hashcatRunner.stop(reason)
+        hashcatSession.stop(reason)
     }
 
     private fun finishHashcatStop()
     {
         hashcatRunState = HashcatRunState.IDLE
-        hashcatNavigationError = false
-        stopHashcatForegroundService()
+        hashcatNavigationError = hashcatFailure != null
         setHashcatBusy(false)
         hashcatStatus = hashcatStatus.copy(
-            state = getString(R.string.hashcat_status_finished)
+            state = when (hashcatFailure)
+            {
+                HashcatFailure.OPENCL_HOST_MEMORY -> getString(R.string.hashcat_status_opencl_host_memory)
+                null -> getString(R.string.hashcat_status_finished)
+            }
         )
         renderHashcatStatus()
-    }
-
-    private fun startHashcatForegroundService()
-    {
-        startForegroundService(
-            Intent(this, HashcatForegroundService::class.java).setAction(
-                HashcatForegroundService.ACTION_START
-            )
-        )
-    }
-
-    private fun stopHashcatForegroundService()
-    {
-        startService(
-            Intent(this, HashcatForegroundService::class.java).setAction(
-                HashcatForegroundService.ACTION_STOP
-            )
-        )
     }
 
     private fun startHashcat()
@@ -1518,10 +1574,10 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
 
         hashcatRunState = HashcatRunState.STARTING
         hashcatNavigationError = false
+        hashcatFailure = null
         hashcatMemoryInfo = null
         renderHashcatMemoryInfo()
         clearHashcatLog()
-        startHashcatForegroundService()
         hashcatStartedAtRealtime = SystemClock.elapsedRealtime()
         hashcatStatus = HashcatStatus(
             state = getString(R.string.hashcat_status_preparing)
@@ -1573,15 +1629,14 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
                     return@thread
                 }
 
-                hashcatRunner.start(
+                hashcatSession.start(
                     hashFile = hashFile,
                     candidateSource = source,
                     hashMode = hashMode,
                     recoveredFile = recoveredFile,
                     memoryProfile = selectedMemoryProfile,
                     workloadProfile = selectedWorkloadProfile,
-                    optimizedKernel = optimizedKernelEnabled,
-                    listener = createHashcatListener(recoveredFile, hashFile)
+                    optimizedKernel = optimizedKernelEnabled
                 )
             }
             catch (error: Throwable)
@@ -1589,7 +1644,6 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
                 runOnUiThread {
                     hashcatRunState = HashcatRunState.IDLE
                     hashcatNavigationError = true
-                    stopHashcatForegroundService()
                     setHashcatBusy(false)
                     hashcatStatus = hashcatStatus.copy(
                         state = getString(R.string.hashcat_status_error)
@@ -1686,113 +1740,129 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
             sample.startsWith(0x0A, 0x0D, 0x0D, 0x0A)
     }
 
-    private fun createHashcatListener(recoveredFile: File, hashFile: File): HashcatRunner.Listener
+    private fun applyHashcatSessionSnapshot(snapshot: HashcatSession.Snapshot)
     {
-        return object : HashcatRunner.Listener
+        hashcatRunState = when (snapshot.runState)
         {
-            override fun onStarted(command: List<String>)
-            {
-                runOnUiThread {
-                    if (hashcatRunState == HashcatRunState.STOPPING)
-                    {
-                        hashcatRunner.stop("stop requested before native start callback")
-                        return@runOnUiThread
-                    }
+            HashcatSession.RunState.IDLE -> HashcatRunState.IDLE
+            HashcatSession.RunState.STARTING -> HashcatRunState.STARTING
+            HashcatSession.RunState.RUNNING -> HashcatRunState.RUNNING
+            HashcatSession.RunState.STOPPING -> HashcatRunState.STOPPING
+        }
+        hashcatNavigationError = snapshot.error != null
+        restoreHashcatLogText(snapshot.logText)
+        setHashcatBusy(hashcatRunState != HashcatRunState.IDLE)
+        renderHashcatStatus()
+        updateHashcatStartState()
+    }
 
-                    appendHashcatLog(
-                        "$ " + command.joinToString(" ")
-                    )
-                }
+    private fun handleHashcatStarted(command: List<String>)
+    {
+        if (hashcatRunState == HashcatRunState.STOPPING)
+        {
+            hashcatSession.stop("stop requested before native start callback")
+            return
+        }
+
+        appendHashcatLog(
+            "$ " + command.joinToString(" ")
+        )
+    }
+
+    private fun handleHashcatOutput(line: String)
+    {
+        if (line.contains("CL_OUT_OF_HOST_MEMORY", ignoreCase = true) ||
+            line.contains("m22000-pure.cl build failed", ignoreCase = true))
+        {
+            hashcatFailure = HashcatFailure.OPENCL_HOST_MEMORY
+            hashcatNavigationError = true
+            hashcatStatus = hashcatStatus.copy(
+                state = getString(R.string.hashcat_status_opencl_host_memory)
+            )
+            renderHashcatStatus()
+        }
+
+        if (hashcatRunState == HashcatRunState.STARTING)
+        {
+            val startupState = when
+            {
+                line.contains("Initialized backend runtimes", ignoreCase = true) ->
+                    getString(R.string.hashcat_status_backend_initialized)
+                line.contains("OpenCL API", ignoreCase = true) ->
+                    getString(R.string.hashcat_status_opencl_initialized)
+                line.startsWith("Initializing device kernels and memory", ignoreCase = true) ->
+                    getString(R.string.hashcat_status_kernels_memory)
+                line.startsWith("Starting autotune", ignoreCase = true) ->
+                    getString(R.string.hashcat_status_autotune)
+                line.startsWith("Status") && line.contains("Running", ignoreCase = true) ->
+                    getString(R.string.hashcat_status_running)
+                else -> null
             }
 
-            override fun onOutput(line: String)
-            {
-                if (hashcatRunState == HashcatRunState.STARTING)
-                {
-                    val startupState = when
-                    {
-                        line.contains("Initialized backend runtimes", ignoreCase = true) ->
-                            getString(R.string.hashcat_status_backend_initialized)
-                        line.contains("OpenCL API", ignoreCase = true) ->
-                            getString(R.string.hashcat_status_opencl_initialized)
-                        line.startsWith("Initializing device kernels and memory", ignoreCase = true) ->
-                            getString(R.string.hashcat_status_kernels_memory)
-                        line.startsWith("Starting autotune", ignoreCase = true) ->
-                            getString(R.string.hashcat_status_autotune)
-                        line.startsWith("Status") && line.contains("Running", ignoreCase = true) ->
-                            getString(R.string.hashcat_status_running)
-                        else -> null
-                    }
-
-                    if (startupState != null)
-                    {
-                        runOnUiThread {
-                            if (line.startsWith("Status") && line.contains("Running", ignoreCase = true))
-                            {
-                                hashcatRunState = HashcatRunState.RUNNING
-                            }
-
-                            hashcatStatus = hashcatStatus.copy(state = startupState)
-                            renderHashcatStatus()
-                        }
-                    }
-                }
-
-                appendHashcatLog(line)
-            }
-
-            override fun onFinished(exitCode: Int)
+            if (startupState != null)
             {
                 runOnUiThread {
-                    hashcatRunState = HashcatRunState.IDLE
-                    hashcatNavigationError = false
-                    stopHashcatForegroundService()
-                    setHashcatBusy(false)
-                    hashcatStatus = hashcatStatus.copy(
-                        state = getString(R.string.hashcat_status_finished)
-                    )
+                    if (line.startsWith("Status") && line.contains("Running", ignoreCase = true))
+                    {
+                        hashcatRunState = HashcatRunState.RUNNING
+                    }
+
+                    hashcatStatus = hashcatStatus.copy(state = startupState)
                     renderHashcatStatus()
-                    appendHashcatLog(
-                        getString(R.string.hashcat_finished, exitCode)
-                    )
-                    if (recoveredFile.isFile && recoveredFile.length() > 0L)
-                    {
-                        val recoveredResult = recoveredFile.readText(Charsets.UTF_8).trim()
-
-                        if (recoveredResult.isNotEmpty())
-                        {
-                            saveRecoveredPasswordEntries(recoveredResult, hashFile)
-                                                renderPasswordEntries()
-        renderPasswordEntries()
-                            appendHashcatLog(getString(R.string.hashcat_result_found, recoveredResult))
-                            appendHashcatLog(
-                                getString(
-                                    R.string.hashcat_result_saved,
-                                    recoveredFile.absolutePath
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            override fun onError(error: Throwable)
-            {
-                runOnUiThread {
-                    hashcatRunState = HashcatRunState.IDLE
-                    hashcatNavigationError = true
-                    stopHashcatForegroundService()
-                    setHashcatBusy(false)
-                    hashcatStatus = hashcatStatus.copy(
-                        state = getString(R.string.hashcat_status_error)
-                    )
-                    renderHashcatStatus()
-                    appendHashcatLog(
-                        "ERROR: ${error.message ?: error.javaClass.simpleName}"
-                    )
                 }
             }
         }
+
+        appendHashcatLog(line)
+    }
+
+    private fun handleHashcatFinished(exitCode: Int, recoveredFile: File, hashFile: File)
+    {
+        hashcatRunState = HashcatRunState.IDLE
+        hashcatNavigationError = hashcatFailure != null
+        setHashcatBusy(false)
+        hashcatStatus = hashcatStatus.copy(
+            state = when (hashcatFailure)
+            {
+                HashcatFailure.OPENCL_HOST_MEMORY -> getString(R.string.hashcat_status_opencl_host_memory)
+                null -> getString(R.string.hashcat_status_finished)
+            }
+        )
+        renderHashcatStatus()
+        appendHashcatLog(
+            getString(R.string.hashcat_finished, exitCode)
+        )
+        if (recoveredFile.isFile && recoveredFile.length() > 0L)
+        {
+            val recoveredResult = recoveredFile.readText(Charsets.UTF_8).trim()
+
+            if (recoveredResult.isNotEmpty())
+            {
+                saveRecoveredPasswordEntries(recoveredResult, hashFile)
+                renderPasswordEntries()
+                appendHashcatLog(getString(R.string.hashcat_result_found, recoveredResult))
+                appendHashcatLog(
+                    getString(
+                        R.string.hashcat_result_saved,
+                        recoveredFile.absolutePath
+                    )
+                )
+            }
+        }
+    }
+
+    private fun handleHashcatError(error: Throwable)
+    {
+        hashcatRunState = HashcatRunState.IDLE
+        hashcatNavigationError = true
+        setHashcatBusy(false)
+        hashcatStatus = hashcatStatus.copy(
+            state = getString(R.string.hashcat_status_error)
+        )
+        renderHashcatStatus()
+        appendHashcatLog(
+            "ERROR: ${error.message ?: error.javaClass.simpleName}"
+        )
     }
 
     /**
@@ -2041,7 +2111,7 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
             fallback
         }
 
-        updateBottomNavigationColors()
+        renderBottomNavigation()
 
         val progressPercent = hashcatStatus.progress
             ?.let(::parseHashcatProgress)
@@ -2156,10 +2226,44 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         }
     }
 
-    private fun shareHashcatLog()
+    private fun snapshotHashcatLogText(): String
     {
         flushHashcatLog()
-        val logText = buildHashcatLogText().trimEnd()
+        return buildHashcatLogText().trimEnd()
+    }
+
+    private fun restoreHashcatLog(savedInstanceState: Bundle?)
+    {
+        restoreHashcatLogText(
+            savedInstanceState?.getString(STATE_HASHCAT_LOG_TEXT).orEmpty()
+        )
+    }
+
+    private fun restoreHashcatLogText(logText: String)
+    {
+        hashcatLogHandler.removeCallbacks(hashcatLogFlushRunnable)
+
+        synchronized(hashcatLogLock)
+        {
+            hashcatLogHistory.clear()
+            hashcatLiveStatus.clear()
+            pendingHashcatLogLines.clear()
+            hashcatLogHistoryCharCount = 0
+            hashcatLogFlushScheduled = false
+        }
+
+        logText.lineSequence().forEach { line ->
+            appendHashcatHistoryLine(line)
+        }
+
+        val restoredLogText = buildHashcatLogText()
+        binding.hashcatLogTextView.setLogText(restoredLogText)
+        binding.shareHashcatLogButton.isEnabled = restoredLogText.isNotBlank()
+    }
+
+    private fun shareHashcatLog()
+    {
+        val logText = snapshotHashcatLogText()
 
         if (logText.isEmpty())
         {
@@ -2773,6 +2877,8 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         const val REQUEST_POST_NOTIFICATIONS = 1005
 
         const val PREFERENCES_NAME = "hashcat_ui"
+        const val PREFERENCE_THEME = "theme"
+        const val PREFERENCE_LANGUAGE = "language"
         const val PREFERENCE_MEMORY_PROFILE = "memory_profile"
         const val PREFERENCE_WORKLOAD_PROFILE = "workload_profile"
         const val PREFERENCE_OPTIMIZED_KERNEL = "optimized_kernel"
@@ -2784,7 +2890,10 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         const val PREFERENCE_MASK_MAX_LENGTH = "mask_max_length"
         const val PREFERENCE_WORDLIST_URI = "wordlist_uri"
         const val PREFERENCE_PASSWORD_ENTRIES = "password_entries"
+        const val THEME_LIGHT = "light"
+        const val THEME_DARK = "dark"
         const val LANGUAGE_RUSSIAN = "ru"
+        const val LANGUAGE_ENGLISH = "en"
 
         const val STATE_SELECTED_SCREEN = "selected_screen"
         const val STATE_CAPTURE_URI = "capture_uri"
@@ -2798,6 +2907,7 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         const val STATE_MASK_MIN_LENGTH = "mask_min_length"
         const val STATE_MASK_MAX_LENGTH = "mask_max_length"
         const val STATE_MEMORY_PROFILE = "memory_profile"
+        const val STATE_HASHCAT_LOG_TEXT = "hashcat_log_text"
 
         const val CANDIDATE_SOURCE_TEMPLATE = "template"
         const val CANDIDATE_SOURCE_WORDLIST = "wordlist"

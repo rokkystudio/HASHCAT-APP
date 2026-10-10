@@ -19,6 +19,29 @@
         <item name="colorSurface">@color/surface</item>
         <item name="colorSurfaceContainer">@color/navigation_background</item>
         <item name="colorSecondaryContainer">@color/navigation_active_indicator</item>
+        <item name="buttonStyle">@style/Hashcat.Button</item>
+        <item name="android:buttonStyle">@style/Hashcat.Button</item>
+    </style>
+
+
+    <style name="Hashcat.Button" parent="Widget.Material3.Button">
+        <item name="android:background">@drawable/bg_button</item>
+        <item name="android:backgroundTint">@null</item>
+        <item name="backgroundTint">@null</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:padding">0dp</item>
+        <item name="android:insetLeft">0dp</item>
+        <item name="android:insetRight">0dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:minHeight">0dp</item>
+        <item name="minWidth">0dp</item>
+        <item name="minHeight">0dp</item>
+        <item name="cornerRadius">10dp</item>
+        <item name="iconTint">@color/button_icon</item>
     </style>
 
     <style name="Hashcat.BottomNavigation" parent="Widget.Material3.BottomNavigationView">

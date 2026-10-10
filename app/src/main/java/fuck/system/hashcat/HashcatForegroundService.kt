@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.rokkystudio.sharedapp.neoui.NeoNotificationViews
 
 /**
  * Keeps Android aware of an active Hashcat run through a foreground notification.
@@ -58,10 +59,22 @@ class HashcatForegroundService : Service()
 
     private fun buildNotification(): Notification
     {
+        val title = getString(R.string.hashcat_notification_title)
+        val text = getString(R.string.hashcat_notification_text)
+        val contentView = NeoNotificationViews.serviceAction(
+            context = this,
+            title = title,
+            text = text,
+            iconResId = R.drawable.ic_hashcat
+        )
+
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_hashcat)
-            .setContentTitle(getString(R.string.hashcat_notification_title))
-            .setContentText(getString(R.string.hashcat_notification_text))
+            .setContentTitle(title)
+            .setContentText(text)
+            .setCustomContentView(contentView)
+            .setCustomBigContentView(contentView)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)

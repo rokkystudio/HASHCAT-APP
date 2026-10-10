@@ -1,5 +1,6 @@
 <resources>
     <string name="app_name">HASHCAT</string>
+    <string name="android_client">Android client</string>
     <string name="app_subtitle">Password recovery</string>
     <string name="theme_light">Light theme</string>
     <string name="theme_dark">Dark theme</string>
@@ -52,6 +53,7 @@
     <string name="hashcat_status_stopping">Stopping</string>
     <string name="hashcat_status_finished">Finished</string>
     <string name="hashcat_status_error">Error</string>
+    <string name="hashcat_status_opencl_host_memory">The OpenCL driver failed to build/link the WPA/WPA2 kernel: CL_OUT_OF_HOST_MEMORY. This is a kernel build-stage error, not necessarily low total phone RAM.</string>
     <string name="hashcat_status_idle">Status: Idle\nProgress: —\nCurrent key: —\nRuntime: —\nRemaining: —\nSpeed: —\nRecovered: —</string>
     <string name="hashcat_status_format">Status: %1$s\nProgress: %2$s\nCurrent key: %3$s\nRuntime: %4$s\nRemaining: %5$s\nSpeed: %6$s\nRecovered: %7$s</string>
 

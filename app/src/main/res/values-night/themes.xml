@@ -19,5 +19,7 @@
         <item name="colorSurface">@color/surface</item>
         <item name="colorSurfaceContainer">@color/navigation_background</item>
         <item name="colorSecondaryContainer">@color/navigation_active_indicator</item>
+        <item name="buttonStyle">@style/Hashcat.Button</item>
+        <item name="android:buttonStyle">@style/Hashcat.Button</item>
     </style>
 </resources>

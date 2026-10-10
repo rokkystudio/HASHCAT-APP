@@ -12,8 +12,8 @@ android {
         applicationId = "fuck.system.hashcat"
         minSdk = 26
         targetSdk = 37
-        versionCode = 10105
-        versionName = "1.1.5"
+        versionCode = 10118
+        versionName = "1.1.18"
 
         ndk {
             abiFilters += listOf(
@@ -56,7 +56,8 @@ android {
 }
 
 dependencies {
-    implementation(libs.neoui)
+    implementation(project(":neoui"))
+    implementation(libs.appcompat)
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.core.ktx)
     implementation(libs.material)

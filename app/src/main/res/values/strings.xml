@@ -1,5 +1,6 @@
 <resources>
     <string name="app_name">HASHCAT</string>
+    <string name="android_client">Android client</string>
     <string name="app_subtitle">Восстановление паролей</string>
     <string name="theme_light">Светлая тема</string>
     <string name="theme_dark">Тёмная тема</string>
@@ -52,6 +53,7 @@
     <string name="hashcat_status_stopping">Остановка</string>
     <string name="hashcat_status_finished">Завершён</string>
     <string name="hashcat_status_error">Ошибка</string>
+    <string name="hashcat_status_opencl_host_memory">Драйвер OpenCL не смог собрать/слинковать ядро WPA/WPA2: CL_OUT_OF_HOST_MEMORY. Это ошибка стадии сборки ядра, а не обязательно нехватка общей памяти телефона.</string>
     <string name="hashcat_status_idle">Статус: Ожидание\nПрогресс: —\nТекущий ключ: —\nВремя работы: —\nОсталось: —\nСкорость: —\nНайдено: —</string>
     <string name="hashcat_status_format">Статус: %1$s\nПрогресс: %2$s\nТекущий ключ: %3$s\nВремя работы: %4$s\nОсталось: %5$s\nСкорость: %6$s\nНайдено: %7$s</string>
 
