@@ -23,10 +23,8 @@ class AppApplication : Application()
                 AppTheme.DARK -> AppCompatDelegate.MODE_NIGHT_YES
             }
         )
-        uiSettings.getExplicitLanguage()?.let { language ->
-            AppCompatDelegate.setApplicationLocales(
-                LocaleListCompat.forLanguageTags(language)
-            )
-        }
+        AppCompatDelegate.setApplicationLocales(
+            LocaleListCompat.forLanguageTags(uiSettings.getLanguage())
+        )
     }
 }
