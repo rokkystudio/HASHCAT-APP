@@ -1,7 +1,7 @@
 package fuck.system.hashcat
 
 import android.content.Context
-import com.rokkystudio.sharedapp.neoui.NeoLanguageDefaults
+import badfox.logic.neoui.NeoLanguageDefaults
 
 /** Stores the selected HASHCAT interface theme and language. */
 class UiSettings(context: Context)

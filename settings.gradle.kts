@@ -26,8 +26,8 @@ dependencyResolutionManagement {
 rootProject.name = "HASHCAT-APP"
 include(":app")
 include(":hashcat")
-include(":geo")
+include(":flags")
 include(":neoui")
 
-project(":geo").projectDir = file("../SHARED-APP/geo")
+project(":flags").projectDir = file("../SHARED-APP/flags")
 project(":neoui").projectDir = file("../SHARED-APP/neoui")
