@@ -30,6 +30,7 @@ import androidx.core.os.LocaleListCompat
 import badfox.logic.neoui.NeoLanguageDefaults
 import badfox.logic.neoui.NeoThemeDefaults
 import badfox.logic.neoui.NeoTopBarView
+import badfox.logic.neoui.applyNeoSystemBarInsets
 import fuck.system.hashcat.databinding.ActivityMainBinding
 import java.io.File
 import java.io.OutputStreamWriter
@@ -165,6 +166,7 @@ class MainActivity : AppCompatActivity()
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        applyNeoSystemBarInsets(binding.root)
         uiSettings = UiSettings(applicationContext)
         neoTopBar = binding.neoTopBar
         renderTopBar()
