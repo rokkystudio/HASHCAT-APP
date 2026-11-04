@@ -1,4 +1,4 @@
-a0112e6a6aa29aa56276b3a1d6005b74a940a3ad51fd8c6a0c3654788352be07  hashcat-v7.1.2-android-arm64-v8a.zip
-acdd0032ceab24db26af867b5ff18946632f4049cd09db670719a5e39d341ccc  hashcat-v7.1.2-android-armeabi-v7a.zip
-8bae4213c240f8473ed20bf0026e42ebda31626b5f49c76fb197ddb2125cd493  hashcat-v7.1.2-android-x86.zip
-0d58797cd267dda738e3eeab58d0f7226d3a227eb59838a9ad02f91fcb1a6982  hashcat-v7.1.2-android-x86_64.zip
+279c40e6fa4d6c71016c8678104af9f48c1474fa8d61822dccef4bfb9fad7519  hashcat-v7.1.2-android-arm64-v8a.zip
+1de82002a3a78ad560d6ed7c83152e93ebeac76d9a9f3fbbff40665df70115a5  hashcat-v7.1.2-android-armeabi-v7a.zip
+52abb4cf1517a7bab95a8d8d61e66607f9e8173db9bcaf4948673f2997f5a046  hashcat-v7.1.2-android-x86.zip
+6330852d6410bc5ea984a1acdf0741951df6afb872e1683949d6962e243d0d65  hashcat-v7.1.2-android-x86_64.zip

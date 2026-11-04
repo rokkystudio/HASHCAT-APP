@@ -165,3 +165,16 @@ to the packaged executable; execution and kernel support remain the
 responsibility of the native Hashcat distribution. The APK packages the
 four published Android ABI distributions, without independent diagnostic
 Vulkan binaries or SPIR-V test assets.
+
+## Runtime archives
+
+The four ABI archives are build artifacts of the HASHCAT repository and are
+published as GitHub release assets instead of being committed here. Fetch them
+before the first build:
+
+```powershell
+.\scripts\FETCH-HASHCAT-RUNTIME.ps1
+```
+
+The script downloads the archives of the configured release tag and verifies
+each file against `hashcat/binaries/SHA256SUMS.txt`.

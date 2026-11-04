@@ -45,9 +45,11 @@ if (missingPublishedLibraries.isNotEmpty()) {
 
 val prepareHashcatRuntime = tasks.register<Sync>("prepareHashcatRuntime") {
     group = "build setup"
-    description = "Extracts every published Hashcat Android ABI into generated Android sources."
+    description = "Stages native runtime assets for all published Android architectures."
 
-    publishedArchives.forEach { (abi, archive) ->
+    publishedAndroidAbis.forEach { abi ->
+        val archive = publishedArchives.getValue(abi)
+
         from(zipTree(archive.asFile)) {
             include(
                 "modules/**",

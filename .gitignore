@@ -20,3 +20,6 @@ local.properties
 
 # JetBrains local workspace/VCS state
 .idea/vcs.xml
+
+# Published Hashcat runtime archives (scripts/FETCH-HASHCAT-RUNTIME.ps1)
+hashcat/binaries/*.zip
