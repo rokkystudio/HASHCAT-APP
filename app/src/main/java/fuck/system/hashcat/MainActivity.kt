@@ -43,9 +43,11 @@ import badfox.logic.neoui.NeoScreenItem
 import badfox.logic.neoui.NeoScreenNavigatorView
 
 /**
- * Hosts the Hashcat, CAP converter and log screens, applies the persisted light
- * or dark theme and application language, accepts hash input from files or the
- * clipboard and forwards native Hashcat output to the log screen.
+ * Hosts the workload, CAP converter and log screens, applies persisted theme
+ * and language, accepts input from files or clipboard and forwards native
+ * process output to the log. The top-level compute selector persists an
+ * OpenCL or Vulkan preference. Only installed workload backends can launch;
+ * an unavailable selection never runs through a different GPU backend.
  */
 @Suppress("DEPRECATION")
 class MainActivity : AppCompatActivity()
@@ -93,6 +95,7 @@ class MainActivity : AppCompatActivity()
     private var hashModes: List<HashcatRunner.HashMode> = emptyList()
     private var selectedHashMode: Int = DEFAULT_HASH_MODE
     private var hashcatReady: Boolean = false
+    private var selectedComputeBackend: ComputeBackend = ComputeBackend.OPENCL
     @Volatile
     private var hashcatRunState: HashcatRunState = HashcatRunState.IDLE
     private var hashcatNavigationError: Boolean = false
@@ -190,6 +193,7 @@ class MainActivity : AppCompatActivity()
             }
         })
         selectedMemoryProfile = loadMemoryProfile()
+        selectedComputeBackend = loadComputeBackend()
         binding.hashModeButton.isEnabled = false
         renderHashcatStatus()
         renderPasswordEntries()
@@ -228,6 +232,7 @@ class MainActivity : AppCompatActivity()
         setupWorkloadSpinner()
         setupOptimizedKernelSwitch()
         setupTuningInfoButtons()
+        setupComputeBackendSelection()
 
         binding.maskTemplateEditText.addTextChangedListener(object : TextWatcher
         {
@@ -379,12 +384,14 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
 
 
     /**
-     * Stops a native Hashcat process when this Activity is destroyed.
+     * Releases UI observers while the foreground service owns any active
+     * native workload independently of the Activity lifecycle.
      */
     override fun onDestroy()
     {
         hashcatLogHandler.removeCallbacks(hashcatLogFlushRunnable)
         hashcatSession.removeObserver(hashcatSessionObserver)
+
         super.onDestroy()
     }
 
@@ -1177,6 +1184,7 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
                     renderSelectedHashMode()
                     updateHashcatStartState()
                 }
+
             }
             catch (error: Throwable)
             {
@@ -1441,6 +1449,81 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         }
     }
 
+
+    /**
+     * Connects the compute backend options to persisted user selection.
+     *
+     * The controls are disabled while a workload runs. Vulkan selection
+     * displays its availability without rerouting the workload to OpenCL.
+     */
+    private fun setupComputeBackendSelection()
+    {
+        binding.computeBackendRadioGroup.check(
+            when (selectedComputeBackend)
+            {
+                ComputeBackend.OPENCL -> R.id.openclBackendOption
+                ComputeBackend.VULKAN -> R.id.vulkanBackendOption
+            }
+        )
+
+        binding.computeBackendRadioGroup.setOnCheckedChangeListener { _, checkedId ->
+            selectedComputeBackend = when (checkedId)
+            {
+                R.id.openclBackendOption -> ComputeBackend.OPENCL
+                R.id.vulkanBackendOption -> ComputeBackend.VULKAN
+                else -> throw IllegalArgumentException("Unexpected compute backend option: $checkedId")
+            }
+
+            getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(PREFERENCE_COMPUTE_BACKEND, selectedComputeBackend.name)
+                .apply()
+
+            renderComputeBackendState()
+        }
+
+        renderComputeBackendState()
+    }
+
+    /**
+     * Reads the explicitly selected compute backend from local preferences.
+     * New installations select OpenCL, the currently packaged workload engine.
+     */
+    private fun loadComputeBackend(): ComputeBackend
+    {
+        val value = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .getString(PREFERENCE_COMPUTE_BACKEND, null)
+
+        return if (value == null)
+        {
+            ComputeBackend.OPENCL
+        }
+        else
+        {
+            ComputeBackend.valueOf(value)
+        }
+    }
+
+    /**
+     * Displays backend availability and refreshes the workload Start control.
+     * An unavailable backend cannot initiate native processing.
+     */
+    private fun renderComputeBackendState()
+    {
+        binding.vulkanBackendUnavailableTextView.visibility = if (
+            selectedComputeBackend == ComputeBackend.VULKAN
+        )
+        {
+            View.VISIBLE
+        }
+        else
+        {
+            View.GONE
+        }
+
+        updateHashcatStartState()
+    }
+
     private fun showTuningInfo(title: Int, message: Int)
     {
         AlertDialog.Builder(this)
@@ -1562,10 +1645,22 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         renderHashcatStatus()
     }
 
+    /**
+     * Starts a workload only through the selected supported compute backend.
+     * Unavailable Vulkan scheduling never falls back to OpenCL.
+     */
     private fun startHashcat()
     {
         if (hashcatRunState != HashcatRunState.IDLE)
         {
+            return
+        }
+
+        if (selectedComputeBackend == ComputeBackend.VULKAN)
+        {
+            val message = getString(R.string.compute_backend_unavailable)
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            appendHashcatLog("ERROR: $message")
             return
         }
 
@@ -1638,7 +1733,8 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
                     recoveredFile = recoveredFile,
                     memoryProfile = selectedMemoryProfile,
                     workloadProfile = selectedWorkloadProfile,
-                    optimizedKernel = optimizedKernelEnabled
+                    optimizedKernel = optimizedKernelEnabled,
+                    backend = selectedComputeBackend
                 )
             }
             catch (error: Throwable)
@@ -1771,17 +1867,23 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         )
     }
 
+    /**
+     * Processes native output, updates OpenCL failure and startup indicators
+     * on the main thread, and queues the original line for batched logging.
+     */
     private fun handleHashcatOutput(line: String)
     {
         if (line.contains("CL_OUT_OF_HOST_MEMORY", ignoreCase = true) ||
             line.contains("m22000-pure.cl build failed", ignoreCase = true))
         {
-            hashcatFailure = HashcatFailure.OPENCL_HOST_MEMORY
-            hashcatNavigationError = true
-            hashcatStatus = hashcatStatus.copy(
-                state = getString(R.string.hashcat_status_opencl_host_memory)
-            )
-            renderHashcatStatus()
+            runOnUiThread {
+                hashcatFailure = HashcatFailure.OPENCL_HOST_MEMORY
+                hashcatNavigationError = true
+                hashcatStatus = hashcatStatus.copy(
+                    state = getString(R.string.hashcat_status_opencl_host_memory)
+                )
+                renderHashcatStatus()
+            }
         }
 
         if (hashcatRunState == HashcatRunState.STARTING)
@@ -2469,6 +2571,8 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         binding.memoryProfileSpinner.isEnabled = !busy
         binding.workloadSpinner.isEnabled = !busy
         binding.optimizedKernelSwitch.isEnabled = !busy
+        binding.openclBackendOption.isEnabled = !busy
+        binding.vulkanBackendOption.isEnabled = !busy
         binding.startHashcatButton.text = when (hashcatRunState)
         {
             HashcatRunState.STARTING,
@@ -2511,7 +2615,7 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
             HashcatRunState.STARTING,
             HashcatRunState.RUNNING -> true
             HashcatRunState.STOPPING -> false
-            HashcatRunState.IDLE -> hasHashInput && hasCandidates && hashcatReady
+            HashcatRunState.IDLE -> hasHashInput && hasCandidates && hashcatReady && selectedComputeBackend == ComputeBackend.OPENCL
         }
     }
 
@@ -2884,6 +2988,7 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         const val PREFERENCE_MEMORY_PROFILE = "memory_profile"
         const val PREFERENCE_WORKLOAD_PROFILE = "workload_profile"
         const val PREFERENCE_OPTIMIZED_KERNEL = "optimized_kernel"
+        const val PREFERENCE_COMPUTE_BACKEND = "compute_backend"
         const val PREFERENCE_HASH_MODE = "hash_mode"
         const val PREFERENCE_CANDIDATE_SOURCE = "candidate_source"
         const val PREFERENCE_MASK_TEMPLATE = "mask_template"

@@ -40,6 +40,10 @@
     <string name="hashcat_log_title">Hashcat log</string>
     <string name="hashcat_status_unknown">—</string>
     <string name="hashcat_progress_zero">0.00 %</string>
+    <string name="compute_backend_title">Compute backend</string>
+    <string name="compute_backend_opencl">OpenCL</string>
+    <string name="compute_backend_vulkan">Vulkan</string>
+    <string name="compute_backend_unavailable">Vulkan compute does not yet support running normal jobs. OpenCL is available; no automatic fallback is performed.</string>
     <string name="hashcat_status_title">Hashcat status</string>
     <string name="hashcat_status_idle_value">Idle</string>
     <string name="hashcat_status_preparing">Preparing</string>

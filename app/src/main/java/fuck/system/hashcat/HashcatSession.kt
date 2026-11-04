@@ -80,6 +80,10 @@ class HashcatSession private constructor(private val appContext: Context)
         }
     }
 
+    /**
+     * Starts one foreground native workload with explicit backend selection,
+     * retains its results, and publishes process state to attached observers.
+     */
     @Synchronized
     fun start(
         hashFile: File,
@@ -88,7 +92,8 @@ class HashcatSession private constructor(private val appContext: Context)
         recoveredFile: File,
         memoryProfile: HashcatRunner.MemoryProfile,
         workloadProfile: HashcatRunner.WorkloadProfile,
-        optimizedKernel: Boolean
+        optimizedKernel: Boolean,
+        backend: ComputeBackend
     )
     {
         if (isRunning())
@@ -119,6 +124,7 @@ class HashcatSession private constructor(private val appContext: Context)
                 memoryProfile = memoryProfile,
                 workloadProfile = workloadProfile,
                 optimizedKernel = optimizedKernel,
+                backend = backend,
                 listener = createRunnerListener(recoveredFile, hashFile)
             )
         }

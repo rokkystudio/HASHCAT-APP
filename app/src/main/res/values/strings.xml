@@ -40,6 +40,10 @@
     <string name="hashcat_log_title">Лог Hashcat</string>
     <string name="hashcat_status_unknown">—</string>
     <string name="hashcat_progress_zero">0.00 %</string>
+    <string name="compute_backend_title">Вычислительный backend</string>
+    <string name="compute_backend_opencl">OpenCL</string>
+    <string name="compute_backend_vulkan">Vulkan</string>
+    <string name="compute_backend_unavailable">Вычислительный backend Vulkan пока не поддерживает запуск обычных задач. Доступен OpenCL; автоматического переключения нет.</string>
     <string name="hashcat_status_title">Статус Hashcat</string>
     <string name="hashcat_status_idle_value">Ожидание</string>
     <string name="hashcat_status_preparing">Подготовка</string>

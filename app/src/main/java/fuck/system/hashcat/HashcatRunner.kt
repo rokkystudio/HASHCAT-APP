@@ -18,13 +18,13 @@ import kotlin.concurrent.thread
  * The payload is produced by the :hashcat Android library module and merged
  * into this APK through implementation(project(":hashcat")).
  *
- * The :hashcat module owns the published Android Hashcat archives under
- * hashcat/binaries and packages a matching executable and runtime tree for
- * arm64-v8a, armeabi-v7a, x86 and x86_64.
+ * The runtime module packages the published executable and ABI-matched
+ * assets for all four Android architectures. The executable runs from
+ * Android's extracted native-library directory and loads its matching
+ * writable asset tree through HASHCAT_SHARED_FOLDER.
  *
- * The executable runs directly from Android's extracted native-library
- * directory. Hashcat's writable shared tree is copied from APK assets into app
- * storage and selected through HASHCAT_SHARED_FOLDER.
+ * Process output, cancellation and final resource cleanup are owned by
+ * this runner.
  */
 class HashcatRunner(
     private val context: Context
@@ -154,8 +154,9 @@ class HashcatRunner(
 
     /**
      * Starts the native executable, forwards its combined stdout/stderr stream to
-     * the listener and enables Hashcat memory-budget diagnostics in that stream.
-     * Inputs are regular private files because native code cannot read Android
+     * the listener, passes the selected backend exclusion flag and enables
+     * Hashcat memory-budget diagnostics in that stream. Inputs are regular private
+     * files because native code cannot read Android
      * content:// URIs directly.
      */
     @Synchronized
@@ -167,6 +168,7 @@ class HashcatRunner(
         memoryProfile: MemoryProfile,
         workloadProfile: WorkloadProfile,
         optimizedKernel: Boolean,
+        backend: ComputeBackend,
         listener: Listener
     )
     {
@@ -200,9 +202,40 @@ class HashcatRunner(
             recovered = recoveredFile,
             memoryProfile = memoryProfile,
             workloadProfile = workloadProfile,
-            optimizedKernel = optimizedKernel
+            optimizedKernel = optimizedKernel,
+            backend = backend
         )
 
+        launchNativeProcess(
+            command = command,
+            runtimeDirectory = runtimeDirectory,
+            nativeDirectory = nativeDirectory,
+            dataDirectory = dataDirectory,
+            cacheDirectory = cacheDirectory,
+            memoryLimitMb = memoryProfile.memoryLimitMb,
+            listener = listener
+        )
+    }
+
+
+    /**
+     * Execute one native command with common cancellation and output handling.
+     *
+     * The selected runtime supplies ABI-matched assets and a private HOME,
+     * temporary and cache directory. Workload memory limits are optional.
+     * One owned native process forwards its combined output to the listener
+     * and clears the process reference after final exit or stream failure.
+     */
+    private fun launchNativeProcess(
+        command: List<String>,
+        runtimeDirectory: File,
+        nativeDirectory: File,
+        dataDirectory: File,
+        cacheDirectory: File,
+        memoryLimitMb: Int?,
+        listener: Listener
+    )
+    {
         val processCommand = buildPrioritizedCommand(command)
         val processBuilder = ProcessBuilder(processCommand)
             .directory(runtimeDirectory)
@@ -214,7 +247,7 @@ class HashcatRunner(
             put("XDG_DATA_HOME", dataDirectory.absolutePath)
             put("XDG_CACHE_HOME", cacheDirectory.absolutePath)
             put("HASHCAT_SHARED_FOLDER", runtimeDirectory.absolutePath)
-            memoryProfile.memoryLimitMb?.let { limitMb ->
+            memoryLimitMb?.let { limitMb ->
                 put("HASHCAT_MEMORY_LIMIT_MB", limitMb.toString())
             }
             putNativeLibraryPath(
@@ -311,78 +344,6 @@ class HashcatRunner(
         }
     }
 
-    private fun buildCommand(
-        executable: File,
-        hashFile: File,
-        candidateSource: CandidateSource,
-        hashMode: Int,
-        potfile: File,
-        recovered: File,
-        memoryProfile: MemoryProfile,
-        workloadProfile: WorkloadProfile,
-        optimizedKernel: Boolean
-    ): List<String>
-    {
-        val command = ArrayList<String>()
-
-        command += executable.absolutePath
-        command += "-m"
-        command += hashMode.toString()
-        command += "-a"
-        command += when (candidateSource)
-        {
-            is CandidateSource.Wordlist -> "0"
-            is CandidateSource.Mask -> "3"
-        }
-        command += "--status"
-        command += "--status-timer=1"
-        command += "--self-test-disable"
-        command += "--session"
-        command += "hashcat-app"
-        command += "--potfile-path"
-        command += potfile.absolutePath
-        command += "--outfile"
-        command += recovered.absolutePath
-
-        workloadProfile.value?.let { workload ->
-            command += "-w"
-            command += workload.toString()
-        }
-
-        if (optimizedKernel)
-        {
-            command += "-O"
-        }
-
-        when (candidateSource)
-        {
-            is CandidateSource.Wordlist ->
-            {
-                command += hashFile.absolutePath
-                command += candidateSource.file.absolutePath
-            }
-
-            is CandidateSource.Mask ->
-            {
-                if (candidateSource.customCharset.isNotBlank())
-                {
-                    command += "-1"
-                    command += candidateSource.customCharset
-                }
-
-                command += "--increment"
-                command += "--increment-min"
-                command += candidateSource.incrementMin.toString()
-                command += "--increment-max"
-                command += candidateSource.incrementMax.toString()
-                command += hashFile.absolutePath
-                command += candidateSource.mask
-            }
-        }
-
-        return command
-    }
-
     /**
      * Returns the stopped process exit code after a bounded wait.
      */
@@ -422,8 +383,8 @@ class HashcatRunner(
     }
 
     /**
-     * Prepares Hashcat's writable shared runtime tree while keeping the
-     * executable in Android's install-time native library directory.
+     * Prepares the installed ABI resources and resolves the packaged native
+     * executable, validating its presence and executable permission.
      */
     private fun prepareRuntime(): File
     {
@@ -452,8 +413,7 @@ class HashcatRunner(
     }
 
     /**
-     * Copies Hashcat's shared runtime tree from APK assets when the app package
-     * changes. The tree must contain OpenCL kernels and plugin directories.
+     * Copies versioned native assets for the device's ABI into private storage.
      */
     private fun copyHashcatSharedAssets(runtimeDirectory: File)
     {
@@ -520,7 +480,7 @@ class HashcatRunner(
     }
 
     /**
-     * Resolves the runtime asset subtree matching Android's selected native ABI.
+     * Resolves the first packaged asset ABI supported by Android.
      */
     private fun resolveHashcatAssetRoot(): String
     {
@@ -547,38 +507,18 @@ class HashcatRunner(
     }
 
     /**
-     * Resolves the APK-extracted native executable path.
+     * Resolves the installed executable from Android's native-library folder.
      */
     private fun resolveBundledExecutable(): File
     {
-        return File(
-            resolveNativeLibraryDirectory(),
-            HASHCAT_EXECUTABLE_NAME
-        )
+        return File(resolveNativeLibraryDirectory(), HASHCAT_EXECUTABLE_NAME)
     }
 
-    /**
-     * Resolves the private portable runtime executable path.
-     */
-    private fun resolveRuntimeExecutable(): File
-    {
-        return File(
-            resolveRuntimeDirectory(),
-            HASHCAT_EXECUTABLE_NAME
-        )
-    }
-
-    /**
-     * Resolves Android's install-time native-library extraction directory.
-     */
     private fun resolveNativeLibraryDirectory(): File
     {
         return File(context.applicationInfo.nativeLibraryDir)
     }
 
-    /**
-     * Resolves the writable directory used as Hashcat's portable root.
-     */
     private fun resolveRuntimeDirectory(): File
     {
         return File(context.filesDir, "hashcat/runtime")
@@ -620,15 +560,99 @@ class HashcatRunner(
         }
     }
 
-    private companion object
+    internal companion object
     {
-        const val LOG_TAG = "Hashcat"
-        const val HASHCAT_EXECUTABLE_NAME = "libhashcat_exec.so"
-        const val HASHCAT_ASSET_ROOT = "hashcat"
-        const val ASSET_MARKER_FILE = ".hashcat-app-assets-version"
-        const val STOP_TIMEOUT_SECONDS = 2L
-        const val STOPPED_EXIT_CODE = 143
-        const val HASHCAT_NICE_INCREMENT = 10
-        const val HASH_MODE_CATALOG = "hashcat-modes.json"
+        /**
+         * Builds the native Hashcat workload command with an explicit compute backend,
+         * placing its exclusion flag before hash and candidate arguments.
+         */
+        internal fun buildCommand(
+            executable: File,
+            hashFile: File,
+            candidateSource: CandidateSource,
+            hashMode: Int,
+            potfile: File,
+            recovered: File,
+            memoryProfile: MemoryProfile,
+            workloadProfile: WorkloadProfile,
+            optimizedKernel: Boolean,
+            backend: ComputeBackend
+        ): List<String>
+        {
+            val command = ArrayList<String>()
+
+            command += executable.absolutePath
+            command += "-m"
+            command += hashMode.toString()
+            command += "-a"
+            command += when (candidateSource)
+            {
+                is CandidateSource.Wordlist -> "0"
+                is CandidateSource.Mask -> "3"
+            }
+            command += "--status"
+            command += "--status-timer=1"
+            command += "--self-test-disable"
+            command += "--session"
+            command += "hashcat-app"
+            command += "--potfile-path"
+            command += potfile.absolutePath
+            command += "--outfile"
+            command += recovered.absolutePath
+
+            workloadProfile.value?.let { workload ->
+                command += "-w"
+                command += workload.toString()
+            }
+
+            if (optimizedKernel)
+            {
+                command += "-O"
+            }
+
+            command += when (backend)
+            {
+                ComputeBackend.OPENCL -> "--backend-ignore-vulkan"
+                ComputeBackend.VULKAN -> "--backend-ignore-opencl"
+            }
+
+            when (candidateSource)
+            {
+                is CandidateSource.Wordlist ->
+                {
+                    command += hashFile.absolutePath
+                    command += candidateSource.file.absolutePath
+                }
+
+                is CandidateSource.Mask ->
+                {
+                    if (candidateSource.customCharset.isNotBlank())
+                    {
+                        command += "-1"
+                        command += candidateSource.customCharset
+                    }
+
+                    command += "--increment"
+                    command += "--increment-min"
+                    command += candidateSource.incrementMin.toString()
+                    command += "--increment-max"
+                    command += candidateSource.incrementMax.toString()
+                    command += hashFile.absolutePath
+                    command += candidateSource.mask
+                }
+            }
+
+            return command
+        }
+
+
+        private const val LOG_TAG = "Hashcat"
+        private const val HASHCAT_EXECUTABLE_NAME = "libhashcat_exec.so"
+        private const val HASHCAT_ASSET_ROOT = "hashcat"
+        private const val ASSET_MARKER_FILE = ".hashcat-app-assets-version"
+        private const val STOP_TIMEOUT_SECONDS = 2L
+        private const val STOPPED_EXIT_CODE = 143
+        private const val HASHCAT_NICE_INCREMENT = 10
+        private const val HASH_MODE_CATALOG = "hashcat-modes.json"
     }
 }
