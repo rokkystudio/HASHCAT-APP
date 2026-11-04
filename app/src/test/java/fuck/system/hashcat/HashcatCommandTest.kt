@@ -31,7 +31,8 @@ class HashcatCommandTest
             memoryProfile = HashcatRunner.MemoryProfile.DISABLED,
             workloadProfile = HashcatRunner.WorkloadProfile.DISABLED,
             optimizedKernel = false,
-            backend = backend
+            backend = backend,
+            backendFlagsSupported = true
         )
     }
 
@@ -79,12 +80,39 @@ class HashcatCommandTest
             memoryProfile = HashcatRunner.MemoryProfile.DISABLED,
             workloadProfile = HashcatRunner.WorkloadProfile.DISABLED,
             optimizedKernel = true,
-            backend = ComputeBackend.OPENCL
+            backend = ComputeBackend.OPENCL,
+            backendFlagsSupported = true
         )
 
         assertEquals(1, command.count { it == "--backend-ignore-vulkan" })
         assertTrue(command.indexOf("--backend-ignore-vulkan") < command.indexOf(File("/private/hashes.input").absolutePath))
         assertTrue(command.indexOf(File("/private/hashes.input").absolutePath) < command.indexOf(File("/private/words.txt").absolutePath))
         assertTrue(command.contains("-O"))
+    }
+
+    /**
+     * Verifies a packaged binary without backend flags receives no exclusion
+     * flag, so a workload still starts on an older native archive.
+     */
+    @Test
+    fun legacyBinaryOmitsBackendFlags()
+    {
+        val command = HashcatRunner.buildCommand(
+            executable = File("/native/libhashcat_exec.so"),
+            hashFile = File("/private/hashes.input"),
+            candidateSource = HashcatRunner.CandidateSource.Wordlist(File("/private/words.txt")),
+            hashMode = 0,
+            potfile = File("/private/session.potfile"),
+            recovered = File("/private/output.txt"),
+            memoryProfile = HashcatRunner.MemoryProfile.DISABLED,
+            workloadProfile = HashcatRunner.WorkloadProfile.DISABLED,
+            optimizedKernel = false,
+            backend = ComputeBackend.OPENCL,
+            backendFlagsSupported = false
+        )
+
+        assertFalse(command.contains("--backend-ignore-vulkan"))
+        assertFalse(command.contains("--backend-ignore-opencl"))
+        assertTrue(command.contains(File("/private/hashes.input").absolutePath))
     }
 }

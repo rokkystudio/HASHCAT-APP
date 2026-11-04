@@ -169,6 +169,7 @@ class HashcatRunner(
         workloadProfile: WorkloadProfile,
         optimizedKernel: Boolean,
         backend: ComputeBackend,
+        backendFlagsSupported: Boolean,
         listener: Listener
     )
     {
@@ -178,6 +179,11 @@ class HashcatRunner(
         }
 
         stopRequested = false
+
+        if (!backendFlagsSupported)
+        {
+            Log.w(LOG_TAG, "Packaged Hashcat predates backend flags; backend selection is inactive.")
+        }
 
         val paths = prepareNativePaths()
         val potfile = File(paths.dataDirectory, "hashcat-app.potfile")
@@ -193,7 +199,8 @@ class HashcatRunner(
             memoryProfile = memoryProfile,
             workloadProfile = workloadProfile,
             optimizedKernel = optimizedKernel,
-            backend = backend
+            backend = backend,
+            backendFlagsSupported = backendFlagsSupported
         )
 
         launchNativeProcess(
@@ -677,7 +684,8 @@ class HashcatRunner(
             memoryProfile: MemoryProfile,
             workloadProfile: WorkloadProfile,
             optimizedKernel: Boolean,
-            backend: ComputeBackend
+            backend: ComputeBackend,
+            backendFlagsSupported: Boolean
         ): List<String>
         {
             val command = ArrayList<String>()
@@ -711,10 +719,15 @@ class HashcatRunner(
                 command += "-O"
             }
 
-            command += when (backend)
+            // A packaged binary without the backend flags must not receive them,
+            // otherwise it rejects the whole command line.
+            if (backendFlagsSupported)
             {
-                ComputeBackend.OPENCL -> "--backend-ignore-vulkan"
-                ComputeBackend.VULKAN -> "--backend-ignore-opencl"
+                command += when (backend)
+                {
+                    ComputeBackend.OPENCL -> "--backend-ignore-vulkan"
+                    ComputeBackend.VULKAN -> "--backend-ignore-opencl"
+                }
             }
 
             when (candidateSource)

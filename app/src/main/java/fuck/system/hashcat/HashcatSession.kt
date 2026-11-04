@@ -93,7 +93,8 @@ class HashcatSession private constructor(private val appContext: Context)
         memoryProfile: HashcatRunner.MemoryProfile,
         workloadProfile: HashcatRunner.WorkloadProfile,
         optimizedKernel: Boolean,
-        backend: ComputeBackend
+        backend: ComputeBackend,
+        backendFlagsSupported: Boolean
     )
     {
         if (isRunning())
@@ -125,6 +126,7 @@ class HashcatSession private constructor(private val appContext: Context)
                 workloadProfile = workloadProfile,
                 optimizedKernel = optimizedKernel,
                 backend = backend,
+                backendFlagsSupported = backendFlagsSupported,
                 listener = createRunnerListener(recoveredFile, hashFile)
             )
         }

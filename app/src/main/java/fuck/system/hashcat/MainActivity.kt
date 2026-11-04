@@ -1842,7 +1842,8 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
                     memoryProfile = selectedMemoryProfile,
                     workloadProfile = selectedWorkloadProfile,
                     optimizedKernel = optimizedKernelEnabled,
-                    backend = selectedComputeBackend
+                    backend = selectedComputeBackend,
+                    backendFlagsSupported = backendCapabilities != null
                 )
             }
             catch (error: Throwable)
