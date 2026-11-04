@@ -96,6 +96,7 @@ class MainActivity : AppCompatActivity()
     private var selectedHashMode: Int = DEFAULT_HASH_MODE
     private var hashcatReady: Boolean = false
     private var selectedComputeBackend: ComputeBackend = ComputeBackend.OPENCL
+    private var backendCapabilities: Capabilities? = null
     @Volatile
     private var hashcatRunState: HashcatRunState = HashcatRunState.IDLE
     private var hashcatNavigationError: Boolean = false
@@ -1185,6 +1186,7 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
                     updateHashcatStartState()
                 }
 
+                loadBackendCapabilitiesInBackground()
             }
             catch (error: Throwable)
             {
@@ -1208,6 +1210,52 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
                     updateHashcatStartState()
                 }
             }
+        }
+    }
+
+    /**
+     * Reads the version-stamped backend description after native runtime
+     * preparation and publishes parsed capabilities on the UI thread.
+     * A missing or unsupported info command leaves Vulkan unavailable.
+     */
+    private fun loadBackendCapabilitiesInBackground()
+    {
+        val capabilities = try
+        {
+            @Suppress("DEPRECATION")
+            val stamp = packageManager.getPackageInfo(packageName, 0).lastUpdateTime.toString()
+            val preferences = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            val result = BackendCapabilitiesCache.resolve(
+                installedStamp = stamp,
+                cachedStamp = preferences.getString(PREFERENCE_BACKEND_CAPABILITIES_STAMP, null),
+                cachedJson = preferences.getString(PREFERENCE_BACKEND_CAPABILITIES_JSON, null),
+                readJson = { hashcatRunner.readBackendCapabilitiesJson() }
+            )
+
+            if (result.refreshed)
+            {
+                preferences.edit()
+                    .putString(PREFERENCE_BACKEND_CAPABILITIES_JSON, result.json.orEmpty())
+                    .putString(PREFERENCE_BACKEND_CAPABILITIES_STAMP, stamp)
+                    .apply()
+            }
+
+            BackendCapabilities.parse(result.json)
+        }
+        catch (error: Exception)
+        {
+            android.util.Log.w("Hashcat", "Unable to load backend capabilities.", error)
+            null
+        }
+
+        runOnUiThread {
+            if (isDestroyed)
+            {
+                return@runOnUiThread
+            }
+
+            backendCapabilities = capabilities
+            renderComputeBackendState()
         }
     }
 
@@ -2989,6 +3037,8 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         const val PREFERENCE_WORKLOAD_PROFILE = "workload_profile"
         const val PREFERENCE_OPTIMIZED_KERNEL = "optimized_kernel"
         const val PREFERENCE_COMPUTE_BACKEND = "compute_backend"
+        const val PREFERENCE_BACKEND_CAPABILITIES_JSON = "backend_capabilities_json"
+        const val PREFERENCE_BACKEND_CAPABILITIES_STAMP = "backend_capabilities_stamp"
         const val PREFERENCE_HASH_MODE = "hash_mode"
         const val PREFERENCE_CANDIDATE_SOURCE = "candidate_source"
         const val PREFERENCE_MASK_TEMPLATE = "mask_template"

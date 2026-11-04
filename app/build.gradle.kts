@@ -61,5 +61,6 @@ dependencies {
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.core.ktx)
     implementation(libs.material)
+    implementation(libs.gson)
     implementation(project(":hashcat"))
 }

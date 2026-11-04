@@ -179,22 +179,12 @@ class HashcatRunner(
 
         stopRequested = false
 
-        val executable = prepareRuntime()
-        val runtimeDirectory = resolveRuntimeDirectory()
-        val nativeDirectory = resolveNativeLibraryDirectory()
-
-        File(context.filesDir, "hashcat/work").mkdirs()
-        val dataDirectory = File(context.filesDir, "hashcat/data").apply {
-            mkdirs()
-        }
-        val cacheDirectory = File(context.cacheDir, "hashcat").apply {
-            mkdirs()
-        }
-        val potfile = File(dataDirectory, "hashcat-app.potfile")
+        val paths = prepareNativePaths()
+        val potfile = File(paths.dataDirectory, "hashcat-app.potfile")
         recoveredFile.parentFile?.mkdirs()
 
         val command = buildCommand(
-            executable = executable,
+            executable = paths.executable,
             hashFile = hashFile,
             candidateSource = candidateSource,
             hashMode = hashMode,
@@ -208,15 +198,147 @@ class HashcatRunner(
 
         launchNativeProcess(
             command = command,
-            runtimeDirectory = runtimeDirectory,
-            nativeDirectory = nativeDirectory,
-            dataDirectory = dataDirectory,
-            cacheDirectory = cacheDirectory,
+            paths = paths,
             memoryLimitMb = memoryProfile.memoryLimitMb,
             listener = listener
         )
     }
 
+
+    /**
+     * Holds the native executable and private paths used by all native commands.
+     */
+    private data class NativePaths(
+        val executable: File,
+        val runtimeDirectory: File,
+        val nativeDirectory: File,
+        val dataDirectory: File,
+        val cacheDirectory: File
+    )
+
+    /**
+     * Prepares ABI resources and writable directories for native processes.
+     */
+    private fun prepareNativePaths(): NativePaths
+    {
+        val executable = prepareRuntime()
+        val runtimeDirectory = resolveRuntimeDirectory()
+        val nativeDirectory = resolveNativeLibraryDirectory()
+
+        File(context.filesDir, "hashcat/work").mkdirs()
+        val dataDirectory = File(context.filesDir, "hashcat/data").apply {
+            mkdirs()
+        }
+        val cacheDirectory = File(context.cacheDir, "hashcat").apply {
+            mkdirs()
+        }
+
+        return NativePaths(
+            executable = executable,
+            runtimeDirectory = runtimeDirectory,
+            nativeDirectory = nativeDirectory,
+            dataDirectory = dataDirectory,
+            cacheDirectory = cacheDirectory
+        )
+    }
+
+    /**
+     * Runs the native capabilities command with the same paths and environment
+     * as a workload. Returns full stdout on success or null on failure or
+     * a 15-second timeout, without modifying the active workload process.
+     */
+    fun readBackendCapabilitiesJson(): String?
+    {
+        return try
+        {
+            val paths = prepareNativePaths()
+            val outputFile = File.createTempFile("hashcat-backend-info-", ".json", paths.cacheDirectory)
+            val errorFile = File.createTempFile("hashcat-backend-error-", ".log", paths.cacheDirectory)
+
+            try
+            {
+                val processBuilder = createNativeProcessBuilder(
+                    command = listOf(paths.executable.absolutePath, "--backend-info-json"),
+                    paths = paths,
+                    memoryLimitMb = null
+                ).redirectErrorStream(false)
+                    .redirectOutput(outputFile)
+                    .redirectError(errorFile)
+
+                val inspectionProcess = processBuilder.start()
+
+                try
+                {
+                    if (!inspectionProcess.waitFor(BACKEND_INFO_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+                    {
+                        inspectionProcess.destroyForcibly()
+                        inspectionProcess.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                        Log.w(LOG_TAG, "Backend capabilities request timed out.")
+                        null
+                    }
+                    else if (inspectionProcess.exitValue() != 0)
+                    {
+                        Log.w(LOG_TAG, "Backend capabilities request exited with code ${inspectionProcess.exitValue()}.")
+                        null
+                    }
+                    else
+                    {
+                        outputFile.readText(Charsets.UTF_8).takeIf(String::isNotBlank)
+                    }
+                }
+                finally
+                {
+                    if (inspectionProcess.isAlive)
+                    {
+                        inspectionProcess.destroyForcibly()
+                    }
+                }
+            }
+            finally
+            {
+                outputFile.delete()
+                errorFile.delete()
+            }
+        }
+        catch (error: Exception)
+        {
+            Log.w(LOG_TAG, "Unable to query native backend capabilities.", error)
+            null
+        }
+    }
+
+    /**
+     * Creates a native process with common working directory, library search
+     * paths, storage environment and optional memory limit.
+     */
+    private fun createNativeProcessBuilder(
+        command: List<String>,
+        paths: NativePaths,
+        memoryLimitMb: Int?
+    ): ProcessBuilder
+    {
+        val processBuilder = ProcessBuilder(buildPrioritizedCommand(command))
+            .directory(paths.runtimeDirectory)
+            .redirectErrorStream(true)
+
+        processBuilder.environment().apply {
+            put("HOME", paths.dataDirectory.absolutePath)
+            put("TMPDIR", paths.cacheDirectory.absolutePath)
+            put("XDG_DATA_HOME", paths.dataDirectory.absolutePath)
+            put("XDG_CACHE_HOME", paths.cacheDirectory.absolutePath)
+            put("HASHCAT_SHARED_FOLDER", paths.runtimeDirectory.absolutePath)
+            memoryLimitMb?.let { limitMb ->
+                put("HASHCAT_MEMORY_LIMIT_MB", limitMb.toString())
+            }
+            putNativeLibraryPath(
+                paths.runtimeDirectory,
+                paths.nativeDirectory,
+                resolveVendorNativeLibraryDirectory()
+            )
+        }
+
+        return processBuilder
+    }
 
     /**
      * Execute one native command with common cancellation and output handling.
@@ -228,34 +350,13 @@ class HashcatRunner(
      */
     private fun launchNativeProcess(
         command: List<String>,
-        runtimeDirectory: File,
-        nativeDirectory: File,
-        dataDirectory: File,
-        cacheDirectory: File,
+        paths: NativePaths,
         memoryLimitMb: Int?,
         listener: Listener
     )
     {
-        val processCommand = buildPrioritizedCommand(command)
-        val processBuilder = ProcessBuilder(processCommand)
-            .directory(runtimeDirectory)
-            .redirectErrorStream(true)
-
-        processBuilder.environment().apply {
-            put("HOME", dataDirectory.absolutePath)
-            put("TMPDIR", cacheDirectory.absolutePath)
-            put("XDG_DATA_HOME", dataDirectory.absolutePath)
-            put("XDG_CACHE_HOME", cacheDirectory.absolutePath)
-            put("HASHCAT_SHARED_FOLDER", runtimeDirectory.absolutePath)
-            memoryLimitMb?.let { limitMb ->
-                put("HASHCAT_MEMORY_LIMIT_MB", limitMb.toString())
-            }
-            putNativeLibraryPath(
-                runtimeDirectory,
-                nativeDirectory,
-                resolveVendorNativeLibraryDirectory()
-            )
-        }
+        val processBuilder = createNativeProcessBuilder(command, paths, memoryLimitMb)
+        val processCommand = processBuilder.command()
 
         if (stopRequested)
         {
@@ -265,8 +366,8 @@ class HashcatRunner(
         Log.i(LOG_TAG, "Starting: ${processCommand.joinToString(" ")}")
         Log.d(
             LOG_TAG,
-            "Runtime=${runtimeDirectory.absolutePath}, " +
-                "native=${nativeDirectory.absolutePath}, " +
+            "Runtime=${paths.runtimeDirectory.absolutePath}, " +
+                "native=${paths.nativeDirectory.absolutePath}, " +
                 "vendor=${resolveVendorNativeLibraryDirectory().absolutePath}"
         )
 
@@ -654,5 +755,6 @@ class HashcatRunner(
         private const val STOPPED_EXIT_CODE = 143
         private const val HASHCAT_NICE_INCREMENT = 10
         private const val HASH_MODE_CATALOG = "hashcat-modes.json"
+        private const val BACKEND_INFO_TIMEOUT_SECONDS = 15L
     }
 }
