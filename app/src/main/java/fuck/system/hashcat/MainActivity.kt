@@ -1553,20 +1553,76 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
     }
 
     /**
-     * Displays backend availability and refreshes the workload Start control.
-     * An unavailable backend cannot initiate native processing.
+     * Indicates whether the selected backend can schedule native workloads.
+     * OpenCL remains usable when the installed binary has no JSON info command.
+     */
+    private fun isSelectedBackendSchedulable(): Boolean
+    {
+        return when (selectedComputeBackend)
+        {
+            ComputeBackend.OPENCL -> backendCapabilities == null ||
+                backendCapabilities?.backend("opencl")?.schedulable == true
+            ComputeBackend.VULKAN -> backendCapabilities?.vulkanSchedulable == true
+        }
+    }
+
+    /**
+     * Explains Vulkan availability using only the parsed native capabilities.
+     */
+    private fun vulkanUnavailableMessage(): String
+    {
+        val capabilities = backendCapabilities
+            ?: return getString(R.string.compute_backend_no_data)
+        val vulkan = capabilities.backend("vulkan")
+
+        return when
+        {
+            vulkan == null || !vulkan.detected ->
+                getString(R.string.compute_backend_vulkan_not_detected)
+            !vulkan.schedulable ->
+                getString(R.string.compute_backend_vulkan_not_schedulable)
+            else -> getString(R.string.compute_backend_vulkan_not_schedulable)
+        }
+    }
+
+    /**
+     * Renders the backend selector, unavailability explanation, selected GPU
+     * and workload Start availability without changing a persisted selection.
      */
     private fun renderComputeBackendState()
     {
-        binding.vulkanBackendUnavailableTextView.visibility = if (
-            selectedComputeBackend == ComputeBackend.VULKAN
-        )
+        val idle = hashcatRunState == HashcatRunState.IDLE
+        val openclAvailable = backendCapabilities == null ||
+            backendCapabilities?.backend("opencl")?.schedulable == true
+        val vulkanAvailable = backendCapabilities?.vulkanSchedulable == true
+
+        binding.openclBackendOption.isEnabled = idle && openclAvailable
+        binding.vulkanBackendOption.isEnabled = idle && vulkanAvailable
+        binding.vulkanBackendUnavailableTextView.visibility = if (vulkanAvailable)
         {
-            View.VISIBLE
+            View.GONE
         }
         else
         {
-            View.GONE
+            View.VISIBLE
+        }
+
+        if (!vulkanAvailable)
+        {
+            binding.vulkanBackendUnavailableTextView.text = vulkanUnavailableMessage()
+        }
+
+        val backendId = selectedComputeBackend.name.lowercase(Locale.ROOT)
+        val backend = backendCapabilities?.backend(backendId)
+        val deviceName = backend?.takeIf { it.schedulable }?.devices?.firstOrNull()?.name
+
+        binding.hashcatBackendStatusTextView.text = if (deviceName == null)
+        {
+            getString(R.string.compute_backend_status, selectedComputeBackend.name)
+        }
+        else
+        {
+            getString(R.string.compute_backend_status_device, selectedComputeBackend.name, deviceName)
         }
 
         updateHashcatStartState()
@@ -1704,9 +1760,13 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
             return
         }
 
-        if (selectedComputeBackend == ComputeBackend.VULKAN)
+        if (!isSelectedBackendSchedulable())
         {
-            val message = getString(R.string.compute_backend_unavailable)
+            val message = when (selectedComputeBackend)
+            {
+                ComputeBackend.OPENCL -> getString(R.string.compute_backend_opencl_not_schedulable)
+                ComputeBackend.VULKAN -> vulkanUnavailableMessage()
+            }
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
             appendHashcatLog("ERROR: $message")
             return
@@ -2619,8 +2679,11 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
         binding.memoryProfileSpinner.isEnabled = !busy
         binding.workloadSpinner.isEnabled = !busy
         binding.optimizedKernelSwitch.isEnabled = !busy
-        binding.openclBackendOption.isEnabled = !busy
-        binding.vulkanBackendOption.isEnabled = !busy
+        binding.openclBackendOption.isEnabled = !busy && (
+            backendCapabilities == null ||
+                backendCapabilities?.backend("opencl")?.schedulable == true
+        )
+        binding.vulkanBackendOption.isEnabled = !busy && backendCapabilities?.vulkanSchedulable == true
         binding.startHashcatButton.text = when (hashcatRunState)
         {
             HashcatRunState.STARTING,
@@ -2663,7 +2726,7 @@ binding.candidateCharsetValueTextView.addTextChangedListener(object : TextWatche
             HashcatRunState.STARTING,
             HashcatRunState.RUNNING -> true
             HashcatRunState.STOPPING -> false
-            HashcatRunState.IDLE -> hasHashInput && hasCandidates && hashcatReady && selectedComputeBackend == ComputeBackend.OPENCL
+            HashcatRunState.IDLE -> hasHashInput && hasCandidates && hashcatReady && isSelectedBackendSchedulable()
         }
     }
 

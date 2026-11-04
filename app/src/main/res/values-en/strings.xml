@@ -44,6 +44,12 @@
     <string name="compute_backend_opencl">OpenCL</string>
     <string name="compute_backend_vulkan">Vulkan</string>
     <string name="compute_backend_unavailable">Vulkan compute does not yet support running normal jobs. OpenCL is available; no automatic fallback is performed.</string>
+    <string name="compute_backend_no_data">Backend capability data is unavailable.</string>
+    <string name="compute_backend_vulkan_not_detected">Vulkan was not detected on this device.</string>
+    <string name="compute_backend_vulkan_not_schedulable">Vulkan was detected, but workload scheduling is not supported.</string>
+    <string name="compute_backend_opencl_not_schedulable">OpenCL cannot schedule workloads on this device.</string>
+    <string name="compute_backend_status">Selected backend: %1$s</string>
+    <string name="compute_backend_status_device">Selected backend: %1$s · Device: %2$s</string>
     <string name="hashcat_status_title">Hashcat status</string>
     <string name="hashcat_status_idle_value">Idle</string>
     <string name="hashcat_status_preparing">Preparing</string>
