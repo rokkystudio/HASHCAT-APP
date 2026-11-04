@@ -105,3 +105,63 @@ files are copied into writable app storage.
 The four ABI archives are published with the repository and the Android app
 packages all four ABIs. At runtime `HashcatRunner` selects the asset subtree
 matching the first supported ABI for which a bundled Hashcat runtime exists.
+
+## Compute backend selection
+
+The workload screen stores `ComputeBackend.OPENCL` or `ComputeBackend.VULKAN`
+under `compute_backend` in the `hashcat_ui` SharedPreferences file.
+The default for a new installation is `OPENCL`. The chosen value is restored
+when the Activity or application restarts and is never silently changed to
+OpenCL when Vulkan is unavailable. The options cannot be changed while a
+workload is starting, running or stopping.
+
+`HashcatRunner` constructs the native workload command with exactly one
+exclusion flag, before the positional hash and candidate arguments:
+
+- OpenCL: `--backend-ignore-vulkan`
+- Vulkan: `--backend-ignore-opencl`
+
+No automatic fallback is performed between backends.
+
+During the startup worker's runtime preparation, the app requests
+`libhashcat_exec.so --backend-info-json` and reads its standard output using
+the same native executable, working directory, library paths and storage
+environment as a normal workload. Capability inspection does not change the
+active native process or its stop state. The query has a 15-second timeout
+and returns no data on launch errors, timeout, nonzero exit code or blank
+output. The app does not parse the human-readable `-I` output.
+
+`BackendCapabilities.parse` accepts only schema `1`, finds backend entries
+by their `id`, and reads `detected`, `schedulable` and device metadata.
+Additional JSON fields are ignored and `modes` is optional. Malformed JSON,
+unsupported schemas and empty backend arrays yield no capabilities. The
+JSON result is cached in `backend_capabilities_json` and versioned with
+`backend_capabilities_stamp`, containing the installed APK's
+`packageInfo.lastUpdateTime.toString()` value. Both positive responses and
+empty negative responses are reused until that stamp changes.
+
+Vulkan can be selected and used to initiate a workload only when the
+`vulkan` backend reports `schedulable: true`. Otherwise its radio button
+is disabled and the screen distinguishes unavailable capability data,
+an undetected Vulkan backend and a detected but unschedulable Vulkan
+backend. A previously saved Vulkan selection remains selected even when
+the radio button is disabled; Start remains blocked.
+
+When `--backend-info-json` is unsupported, the UI still permits selecting
+OpenCL and initiating its native process, preserving the previous selector
+state. The resulting command always includes `--backend-ignore-vulkan`.
+A packaged binary that does not recognize this exclusion flag will reject
+the command and terminate without starting the workload; the application
+does not silently omit the required flag. If valid capabilities explicitly
+report OpenCL as unschedulable, the OpenCL choice and workload Start are
+disabled.
+The status card shows the selected backend and the first reported device
+name when that backend is schedulable and has a device; otherwise it shows
+the backend alone.
+
+The app does not implement native Vulkan kernel scheduling. A positive
+`schedulable` claim only enables forwarding the selected Vulkan command
+to the packaged executable; execution and kernel support remain the
+responsibility of the native Hashcat distribution. The APK packages the
+four published Android ABI distributions, without independent diagnostic
+Vulkan binaries or SPIR-V test assets.

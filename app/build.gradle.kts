@@ -62,5 +62,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.material)
     implementation(libs.gson)
+    testImplementation(libs.junit)
     implementation(project(":hashcat"))
 }

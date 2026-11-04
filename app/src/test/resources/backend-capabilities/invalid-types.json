@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "hashcat_version": "v7.1.2",
+  "backends": [
+    {
+      "id": "vulkan",
+      "detected": true,
+      "schedulable": "false",
+      "devices": [
+        {
+          "id": 2,
+          "name": "Vulkan GPU",
+          "type": "GPU",
+          "vendor_id": 5140,
+          "backend": "vulkan"
+        }
+      ]
+    },
+    {
+      "id": "cuda",
+      "detected": false,
+      "schedulable": false,
+      "devices": []
+    },
+    {
+      "id": "hip",
+      "detected": false,
+      "schedulable": false,
+      "devices": []
+    },
+    {
+      "id": "metal",
+      "detected": false,
+      "schedulable": false,
+      "devices": []
+    },
+    {
+      "id": "opencl",
+      "detected": true,
+      "schedulable": true,
+      "devices": [
+        {
+          "id": 1,
+          "name": "Adreno 730",
+          "type": "GPU",
+          "vendor_id": 2147483648,
+          "backend": "opencl"
+        }
+      ]
+    }
+  ],
+  "modes": {}
+}
