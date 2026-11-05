@@ -21,5 +21,16 @@ local.properties
 # JetBrains local workspace/VCS state
 .idea/vcs.xml
 
-# Published Hashcat runtime archives (scripts/FETCH-HASHCAT-RUNTIME.ps1)
+# Published Hashcat runtime archives and other downloaded bundles
+# (scripts/FETCH-HASHCAT-RUNTIME.ps1). Only the small checked-in helpers under
+# android-libs/ and the SHA256SUMS files belong in the repository.
 hashcat/binaries/*.zip
+hashcat/binaries/**/*.zip
+hashcat/binaries/*.7z
+hashcat/binaries/**/*.7z
+hashcat/binaries/*.tar
+hashcat/binaries/**/*.tar
+hashcat/binaries/*.tar.gz
+hashcat/binaries/**/*.tar.gz
+hashcat/binaries/*.tgz
+hashcat/binaries/**/*.tgz
