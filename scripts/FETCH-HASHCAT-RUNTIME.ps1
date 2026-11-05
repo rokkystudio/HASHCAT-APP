@@ -18,7 +18,7 @@ powershell -File scripts/FETCH-HASHCAT-RUNTIME.ps1 -ReleaseTag v7.1.2-fork.1 -Fo
 param(
     [string]$Repository = 'rokkystudio/HASHCAT',
 
-    [string]$ReleaseTag = 'v7.1.2-fork.2',
+    [string]$ReleaseTag = 'v7.1.2-fork.3',
 
     [string]$Destination = '',
 
