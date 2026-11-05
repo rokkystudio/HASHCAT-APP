@@ -342,6 +342,7 @@ class HashcatRunner(
                 paths.nativeDirectory,
                 *resolveVendorNativeLibraryDirectories().toTypedArray()
             )
+            applyOpenCLCompilerHeapArena(command)
         }
 
         return processBuilder
@@ -656,6 +657,47 @@ class HashcatRunner(
     }
 
     /**
+     * Returns the hash mode requested on the command line, if any.
+     */
+    private fun hashModeFrom(command: List<String>): Int?
+    {
+        val index = command.indexOf("-m")
+
+        if (index < 0 || index + 1 >= command.size) return null
+
+        return command[index + 1].toIntOrNull()
+    }
+
+    /**
+     * Modes 22000/22001/22002 share OpenCL/m22000-pure.cl, whose unrolled
+     * SHA1/PBKDF2 transforms make the ARM Mali LLVM front end allocate tens of
+     * thousands of small blocks and overshoot vm.max_map_count. That shows up
+     * as "mmap failed: Out of memory" plus SIGABRT/exit 134 on an idle device,
+     * so these workloads get the heap shim described in
+     * scripts/native/hc-arena/arena.c. Other modes compile fine without it.
+     */
+    private fun needsOpenCLCompilerHeapArena(hashMode: Int?): Boolean
+    {
+        return hashMode == 22000 || hashMode == 22001 || hashMode == 22002
+    }
+
+    /**
+     * Preloads the Mali compiler heap shim when the packaged ABI provides it.
+     * The shim is transparent for every other allocation pattern, so a missing
+     * file only means the workload keeps the stock allocator.
+     */
+    private fun MutableMap<String, String>.applyOpenCLCompilerHeapArena(command: List<String>)
+    {
+        if (!needsOpenCLCompilerHeapArena(hashModeFrom(command))) return
+
+        val library = File(resolveNativeLibraryDirectory(), OPENCL_COMPILER_HEAP_ARENA_NAME)
+
+        if (!library.isFile) return
+
+        this["LD_PRELOAD"] = library.absolutePath
+    }
+
+    /**
      * Prepends native library folders to LD_LIBRARY_PATH so companion native
      * dependencies can be placed in the runtime or jniLibs/<abi>/ directory.
      */
@@ -768,6 +810,7 @@ class HashcatRunner(
 
         private const val LOG_TAG = "Hashcat"
         private const val HASHCAT_EXECUTABLE_NAME = "libhashcat_exec.so"
+        private const val OPENCL_COMPILER_HEAP_ARENA_NAME = "libhc_arena.so"
         private const val HASHCAT_ASSET_ROOT = "hashcat"
         private const val ASSET_MARKER_FILE = ".hashcat-app-assets-version"
         private const val STOP_TIMEOUT_SECONDS = 2L
