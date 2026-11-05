@@ -340,7 +340,7 @@ class HashcatRunner(
             putNativeLibraryPath(
                 paths.runtimeDirectory,
                 paths.nativeDirectory,
-                resolveVendorNativeLibraryDirectory()
+                *resolveVendorNativeLibraryDirectories().toTypedArray()
             )
         }
 
@@ -375,7 +375,7 @@ class HashcatRunner(
             LOG_TAG,
             "Runtime=${paths.runtimeDirectory.absolutePath}, " +
                 "native=${paths.nativeDirectory.absolutePath}, " +
-                "vendor=${resolveVendorNativeLibraryDirectory().absolutePath}"
+                "vendor=${resolveVendorNativeLibraryDirectories().joinToString(":") { it.absolutePath }}"
         )
 
         val startedProcess = try
@@ -633,13 +633,13 @@ class HashcatRunner(
     }
 
     /**
-     * Resolves the vendor native-library directory matching this app process.
+     * Resolves the vendor native-library directories matching this app process.
      * Android devices commonly expose GPU OpenCL implementations from this
      * directory, including vendor-public libOpenCL.so implementations.
      */
-    private fun resolveVendorNativeLibraryDirectory(): File
+    private fun resolveVendorNativeLibraryDirectories(): List<File>
     {
-        return if (android.os.Process.is64Bit())
+        val vendorDirectory = if (android.os.Process.is64Bit())
         {
             File("/vendor/lib64")
         }
@@ -647,6 +647,12 @@ class HashcatRunner(
         {
             File("/vendor/lib")
         }
+
+        // Vendor OpenCL loaders dlopen their ICD (libGLES_mali.so on ARM Mali)
+        // by bare name from the egl/ subdirectory, so egl/ must be searchable
+        // too. Otherwise the linker refuses the dependency and clGetPlatformIDs
+        // reports CL_PLATFORM_NOT_FOUND_KHR despite the loader being present.
+        return listOf(vendorDirectory, File(vendorDirectory, "egl"))
     }
 
     /**
